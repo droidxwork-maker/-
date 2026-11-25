@@ -55,6 +55,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -87,14 +88,19 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
-import com.example.data.model.AiChatModel
 import com.example.data.model.AiPersonas
+import com.example.data.model.AiResponseMode
 import com.example.data.model.ChatMessageRecord
 import com.example.data.model.Conversation
+import com.example.data.model.DEFAULT_DAILY_REQUEST_LIMIT
+import com.example.data.model.QuotaDateHelper
 import com.example.data.model.UiState
 import com.example.ui.components.MarkdownMessageView
+import com.example.ui.theme.AmberSpark
+import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.viewmodel.ChatViewModel
 import java.util.Locale
 
@@ -106,7 +112,6 @@ fun ChatScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
-    val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
     val selectedPersona by viewModel.selectedPersona.collectAsStateWithLifecycle()
     val selectedConvId by viewModel.selectedConversationId.collectAsStateWithLifecycle()
     val temperature by viewModel.temperature.collectAsStateWithLifecycle()
@@ -114,14 +119,21 @@ fun ChatScreen(
     val prefillDraft by viewModel.prefillDraft.collectAsStateWithLifecycle()
     val messagesState by viewModel.messagesState.collectAsStateWithLifecycle()
     val conversationsState by viewModel.conversationsState.collectAsStateWithLifecycle()
+    val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val streamingReply by viewModel.streamingReply.collectAsStateWithLifecycle()
+    val retryStatus by viewModel.retryStatus.collectAsStateWithLifecycle()
     val isSending by viewModel.isSending.collectAsStateWithLifecycle()
     val attachedBitmap by viewModel.attachedBitmap.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
+    val todayUtc = remember { QuotaDateHelper.todayUtc() }
+    val dailyLimit = userProfile?.effectiveDailyLimit() ?: DEFAULT_DAILY_REQUEST_LIMIT
+    val remainingToday = userProfile?.remainingDailyRequests(todayUtc) ?: dailyLimit
+    val activeResponseMode = remember(temperature) { AiResponseMode.closestTo(temperature) }
+
     var inputText by rememberSaveable { mutableStateOf("") }
     var searchHistoryQuery by remember { mutableStateOf("") }
-    var showModelMenu by remember { mutableStateOf(false) }
+    var showModeMenu by remember { mutableStateOf(false) }
     var showHistorySheet by remember { mutableStateOf(false) }
     var showParamsDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Conversation?>(null) }
@@ -167,7 +179,7 @@ fun ChatScreen(
             // Top Controls Bar
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
+                tonalElevation = 1.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -208,7 +220,7 @@ fun ChatScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Tune,
-                                contentDescription = "تنظیمات دما و دستورالعمل"
+                                contentDescription = "تنظیمات گفتگو"
                             )
                         }
                         if (messages.isNotEmpty()) {
@@ -222,7 +234,7 @@ fun ChatScreen(
                                         type = "text/plain"
                                         putExtra(Intent.EXTRA_TEXT, md)
                                     }
-                                    context.startActivity(Intent.createChooser(intent, "خروجی Markdown"))
+                                    context.startActivity(Intent.createChooser(intent, "اشتراک‌گذاری گفتگو"))
                                 },
                                 modifier = Modifier
                                     .minimumInteractiveComponentSize()
@@ -236,80 +248,96 @@ fun ChatScreen(
                         }
                     }
 
-                    Box {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Daily Quota Pill
+                        val quotaColor = when {
+                            remainingToday == 0L -> MaterialTheme.colorScheme.error
+                            remainingToday <= 5L -> AmberSpark
+                            else -> EmeraldSuccess
+                        }
                         Surface(
                             shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            border = BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                            ),
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .clickable { showModelMenu = true }
-                                .testTag("chat_model_selector")
+                            color = quotaColor.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, quotaColor.copy(alpha = 0.4f))
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = selectedModel.badge,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.Filled.KeyboardArrowDown,
-                                    contentDescription = "انتخاب مدل",
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            Text(
+                                text = "$remainingToday/$dailyLimit",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = quotaColor,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
                         }
 
-                        DropdownMenu(
-                            expanded = showModelMenu,
-                            onDismissRequest = { showModelMenu = false }
-                        ) {
-                            AiChatModel.entries.forEach { model ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
+                        // Response Mode Selector
+                        Box {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                ),
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .clickable { showModeMenu = true }
+                                    .testTag("chat_mode_selector")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = activeResponseMode.titleFa,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Icon(
+                                        imageVector = Icons.Filled.KeyboardArrowDown,
+                                        contentDescription = "تغییر حالت پاسخگویی",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = showModeMenu,
+                                onDismissRequest = { showModeMenu = false }
+                            ) {
+                                AiResponseMode.entries.forEach { mode ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
                                                 Text(
-                                                    text = model.titleFa,
+                                                    text = mode.titleFa,
                                                     style = MaterialTheme.typography.titleSmall,
                                                     fontWeight = FontWeight.SemiBold
                                                 )
                                                 Text(
-                                                    text = model.contextInfo,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.primary
+                                                    text = mode.descriptionFa,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
-                                            Text(
-                                                text = model.subtitleFa,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                        },
+                                        onClick = {
+                                            viewModel.selectResponseMode(mode)
+                                            showModeMenu = false
                                         }
-                                    },
-                                    onClick = {
-                                        viewModel.selectModel(model)
-                                        showModelMenu = false
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
                     }
@@ -327,6 +355,33 @@ fun ChatScreen(
                             selected = selectedPersona.id == persona.id,
                             onClick = { viewModel.selectPersona(persona) },
                             label = { Text(persona.titleFa) }
+                        )
+                    }
+                }
+            }
+
+            if (retryStatus != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = retryStatus.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
                         )
                     }
                 }
@@ -405,8 +460,9 @@ fun ChatScreen(
                         if (state.data.isEmpty() && streamingReply == null) {
                             ChatEmptyState(
                                 personaTitle = selectedPersona.titleFa,
-                                modelTitle = selectedModel.titleFa,
-                                temperature = temperature,
+                                modeTitle = activeResponseMode.titleFa,
+                                remainingToday = remainingToday,
+                                dailyLimit = dailyLimit,
                                 starterPrompt = selectedPersona.starterPrompt,
                                 onUseStarter = { inputText = selectedPersona.starterPrompt }
                             )
@@ -415,11 +471,11 @@ fun ChatScreen(
                             LazyColumn(
                                 state = listState,
                                 modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(18.dp)
                             ) {
                                 items(state.data, key = { it.id }) { msg ->
-                                    ChatBubble(
+                                    ChatMessageItem(
                                         message = msg,
                                         isLastModelMessage = msg.id == lastModelId && !isSending,
                                         onCopy = {
@@ -432,9 +488,9 @@ fun ChatScreen(
                                 }
                                 if (streamingReply != null) {
                                     item(key = "streaming_bubble") {
-                                        StreamingBubble(
+                                        BorderlessStreamingMessage(
                                             text = streamingReply.orEmpty(),
-                                            modelBadge = selectedModel.badge
+                                            isRetrying = retryStatus != null
                                         )
                                     }
                                 }
@@ -465,7 +521,7 @@ fun ChatScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "تصویر آماده تحلیل چندوجهی",
+                            text = "تصویر آماده تحلیل هوشمند",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f)
                         )
@@ -479,104 +535,115 @@ fun ChatScreen(
             // Bottom Composer
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
+                tonalElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    IconButton(
-                        onClick = {
-                            photoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        enabled = !isSending,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("chat_attach_image_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.AttachFile,
-                            contentDescription = "افزودن تصویر",
-                            tint = MaterialTheme.colorScheme.primary
+                Column {
+                    if (remainingToday == 0L) {
+                        Text(
+                            text = "سهمیه روزانه امروز به پایان رسیده است و فردا به‌صورت خودکار تمدید می‌شود.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                         )
                     }
-
-                    OutlinedTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        placeholder = {
-                            Text(
-                                text = stringResource(R.string.chat_input_placeholder),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
-                        maxLines = 5,
-                        shape = RoundedCornerShape(22.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                        ),
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .testTag("chat_message_input")
-                    )
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    if (isSending) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            IconButton(
-                                onClick = { viewModel.stopStreaming() },
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .testTag("chat_stop_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Stop,
-                                    contentDescription = "توقف تولید پاسخ",
-                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        IconButton(
+                            onClick = {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
-                            }
-                        }
-                    } else {
-                        Surface(
-                            shape = CircleShape,
-                            color = if (inputText.isNotBlank() || attachedBitmap != null) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
                             },
-                            modifier = Modifier.size(48.dp)
+                            enabled = !isSending && remainingToday > 0L,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("chat_attach_image_btn")
                         ) {
-                            IconButton(
-                                onClick = {
-                                    val toSend = inputText
-                                    inputText = ""
-                                    viewModel.sendMessage(toSend)
-                                },
-                                enabled = inputText.isNotBlank() || attachedBitmap != null,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .testTag("chat_send_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "ارسال پیام",
-                                    tint = if (inputText.isNotBlank() || attachedBitmap != null) {
-                                        MaterialTheme.colorScheme.onPrimary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
+                            Icon(
+                                imageVector = Icons.Filled.AttachFile,
+                                contentDescription = "افزودن تصویر",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            placeholder = {
+                                Text(
+                                    text = stringResource(R.string.chat_input_placeholder),
+                                    style = MaterialTheme.typography.bodyLarge
                                 )
+                            },
+                            maxLines = 5,
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("chat_message_input")
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        if (isSending) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { viewModel.stopStreaming() },
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .testTag("chat_stop_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Stop,
+                                        contentDescription = "توقف تولید پاسخ",
+                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                        } else {
+                            val canSend = (inputText.isNotBlank() || attachedBitmap != null) && remainingToday > 0L
+                            Surface(
+                                shape = CircleShape,
+                                color = if (canSend) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val toSend = inputText
+                                        inputText = ""
+                                        viewModel.sendMessage(toSend)
+                                    },
+                                    enabled = canSend,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .testTag("chat_send_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = "ارسال پیام",
+                                        tint = if (canSend) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -663,11 +730,11 @@ fun ChatScreen(
 
         AlertDialog(
             onDismissRequest = { showParamsDialog = false },
-            title = { Text("پارامترهای مدل گفتگو") },
+            title = { Text("شخصی‌سازی پاسخ‌دهی") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "دما (Temperature): ${String.format(Locale.US, "%.2f", tempDraft)}",
+                        text = "میزان خلاقیت: ${String.format(Locale.US, "%.2f", tempDraft)}",
                         style = MaterialTheme.typography.titleSmall
                     )
                     Slider(
@@ -676,14 +743,14 @@ fun ChatScreen(
                         valueRange = 0f..1.5f
                     )
                     Text(
-                        text = "مقادیر پایین برای دقت فنی/کدنویسی و مقادیر بالا برای خلاقیت مناسب است.",
+                        text = "مقادیر پایین برای دقت فنی و کدنویسی و مقادیر بالا برای ایده‌پردازی مناسب است.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedTextField(
                         value = sysDraft,
                         onValueChange = { sysDraft = it },
-                        label = { Text("دستورالعمل سیستمی سفارشی (اختیاری)") },
+                        label = { Text("دستورالعمل اختصاصی گفتگو (اختیاری)") },
                         placeholder = { Text(selectedPersona.systemPrompt) },
                         minLines = 3,
                         maxLines = 5,
@@ -743,8 +810,9 @@ fun ChatScreen(
 @Composable
 private fun ChatEmptyState(
     personaTitle: String,
-    modelTitle: String,
-    temperature: Float,
+    modeTitle: String,
+    remainingToday: Long,
+    dailyLimit: Long,
     starterPrompt: String,
     onUseStarter: () -> Unit
 ) {
@@ -758,33 +826,33 @@ private fun ChatEmptyState(
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(64.dp)
+            modifier = Modifier.size(68.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.Filled.AutoAwesome,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(30.dp)
+                    modifier = Modifier.size(32.dp)
                 )
             }
         }
         Spacer(modifier = Modifier.height(14.dp))
         Text(
             text = personaTitle,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "$modelTitle • Temp ${String.format(Locale.US, "%.1f", temperature)}",
-            style = MaterialTheme.typography.labelSmall,
+            text = "حالت $modeTitle • سهمیه باقی‌مانده امروز: $remainingToday از $dailyLimit",
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary
         )
         Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = "پاسخ‌ها با پشتیبانی کامل از Markdown، بلوک کد قابل کپی و محاسبه دقیق توکن ارائه می‌شوند.",
-            style = MaterialTheme.typography.bodySmall,
+            text = "پاسخ‌ها با خوانایی بالا، جداول کامل و رنگ‌آمیزی هوشمند کدها ارائه می‌شوند.",
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(18.dp))
@@ -797,19 +865,19 @@ private fun ChatEmptyState(
                 .clickable(onClick = onUseStarter)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Filled.AutoAwesome,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "نمونه دستور: $starterPrompt",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "پیشنهاد شروع: $starterPrompt",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
@@ -818,7 +886,7 @@ private fun ChatEmptyState(
 }
 
 @Composable
-private fun ChatBubble(
+private fun ChatMessageItem(
     message: ChatMessageRecord,
     isLastModelMessage: Boolean,
     onCopy: () -> Unit,
@@ -826,88 +894,22 @@ private fun ChatBubble(
     onRegenerate: () -> Unit
 ) {
     val isUser = message.role == "user"
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-    ) {
-        Surface(
-            shape = RoundedCornerShape(
-                topStart = 18.dp,
-                topEnd = 18.dp,
-                bottomStart = if (isUser) 18.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 18.dp
-            ),
-            color = if (isUser) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-            border = if (isUser) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier.widthIn(max = 620.dp)
+    if (isUser) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                if (!isUser) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = AiChatModel.fromId(message.modelName).badge,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            if (message.totalTokens > 0L || message.latencyMs > 0L) {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "${message.totalTokens} tok • ${message.latencyMs}ms",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Row {
-                            if (isLastModelMessage) {
-                                IconButton(
-                                    onClick = onRegenerate,
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Refresh,
-                                        contentDescription = "تولید مجدد پاسخ",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                            IconButton(
-                                onClick = onCopy,
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ContentCopy,
-                                    contentDescription = "کپی متن",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    MarkdownMessageView(
-                        text = message.text,
-                        textColor = MaterialTheme.colorScheme.onSurface,
-                        onCodeCopied = onCodeCopied
-                    )
-                } else {
+            Surface(
+                shape = RoundedCornerShape(
+                    topStart = 20.dp,
+                    topEnd = 20.dp,
+                    bottomStart = 20.dp,
+                    bottomEnd = 6.dp
+                ),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.widthIn(max = 560.dp)
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     if (message.hasImageAttachment) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -917,11 +919,11 @@ private fun ChatBubble(
                                 imageVector = Icons.Filled.Image,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(15.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "همراه با تصویر",
+                                text = "تصویر پیوست‌شده",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
@@ -930,49 +932,133 @@ private fun ChatBubble(
                     SelectionContainer {
                         Text(
                             text = message.text,
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 15.5.sp,
+                                lineHeight = 26.sp
+                            ),
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
             }
         }
+    } else {
+        // Modern Borderless AI Message (No card, no border, direct on canvas)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp, vertical = 2.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "نوا هوش",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    if (message.latencyMs > 0L) {
+                        val sec = String.format(Locale.US, "%.1f", message.latencyMs / 1000.0)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "${sec}s",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isLastModelMessage) {
+                        IconButton(
+                            onClick = onRegenerate,
+                            modifier = Modifier.minimumInteractiveComponentSize()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = "تولید مجدد پاسخ",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onCopy,
+                        modifier = Modifier.minimumInteractiveComponentSize()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ContentCopy,
+                            contentDescription = "کپی متن کامل",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            MarkdownMessageView(
+                text = message.text,
+                textColor = MaterialTheme.colorScheme.onBackground,
+                onCodeCopied = onCodeCopied
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(
+                thickness = 0.6.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            )
+        }
     }
 }
 
 @Composable
-private fun StreamingBubble(text: String, modelBadge: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start
+private fun BorderlessStreamingMessage(text: String, isRetrying: Boolean) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp, vertical = 2.dp)
     ) {
-        Surface(
-            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-            modifier = Modifier.widthIn(max = 620.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "$modelBadge • در حال استریم پاسخ...",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                if (text.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    MarkdownMessageView(
-                        text = "$text ▍",
-                        textColor = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.2.dp,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = if (isRetrying) "در حال تنظیم ارتباط..." else "نوا هوش در حال نوشتن...",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        if (text.isNotBlank()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            MarkdownMessageView(
+                text = "$text ▍",
+                textColor = MaterialTheme.colorScheme.onBackground
+            )
         }
     }
 }
@@ -1007,7 +1093,7 @@ private fun HistoryConversationItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${conversation.messageCount} پیام • ${AiChatModel.fromId(conversation.modelName).badge}",
+                    text = "${conversation.messageCount} پیام",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

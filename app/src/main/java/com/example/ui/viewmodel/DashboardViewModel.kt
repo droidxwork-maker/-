@@ -8,7 +8,6 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.data.model.Conversation
 import com.example.data.model.CustomAssistant
-import com.example.data.model.ImageCreation
 import com.example.data.model.UiState
 import com.example.data.model.UsageLog
 import com.example.data.model.UserProfile
@@ -77,24 +76,6 @@ class DashboardViewModel(
                 initialValue = UiState.Loading
             )
 
-    val creationsState: StateFlow<UiState<List<ImageCreation>>> =
-        firestoreRepo.observeImageCreations(currentUserId)
-            .map<List<ImageCreation>, UiState<List<ImageCreation>>> { UiState.Success(it) }
-            .catch { error ->
-                val firestoreError = generateSequence(error) { it.cause }
-                    .filterIsInstance<FirebaseFirestoreException>()
-                    .firstOrNull()
-                if (firestoreError == null && error is CancellationException) throw error
-                val root = firestoreError ?: error
-                Log.w(TAG, "Error observing image creations", root)
-                emit(UiState.Error(root.localizedMessage ?: "خطا در دریافت تصاویر"))
-            }
-            .stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000L),
-                initialValue = UiState.Loading
-            )
-
     val usageLogsState: StateFlow<UiState<List<UsageLog>>> =
         firestoreRepo.observeUsageLogs(currentUserId)
             .map<List<UsageLog>, UiState<List<UsageLog>>> { UiState.Success(it) }
@@ -131,20 +112,11 @@ class DashboardViewModel(
                 initialValue = UiState.Loading
             )
 
-    fun updatePreferredChatModel(modelId: String) {
-        viewModelScope.launch {
-            firestoreRepo.updatePreferredChatModel(modelId)
-                .onFailure { e ->
-                    _actionError.value = e.localizedMessage ?: "خطا در ذخیره مدل پیش‌فرض"
-                }
-        }
-    }
-
     fun updatePreferredTemperature(temperature: Double) {
         viewModelScope.launch {
             firestoreRepo.updatePreferredTemperature(temperature)
                 .onFailure { e ->
-                    _actionError.value = e.localizedMessage ?: "خطا در ذخیره دما"
+                    _actionError.value = e.localizedMessage ?: "خطا در ذخیره تنظیمات"
                 }
         }
     }

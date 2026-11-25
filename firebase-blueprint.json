@@ -2,7 +2,7 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Authenticated user profile and real AI platform usage telemetry.",
+      "description": "Authenticated user profile, daily quota, and AI platform usage telemetry.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -13,9 +13,13 @@
         "totalMessages": { "type": "integer" },
         "totalImages": { "type": "integer" },
         "totalTokensUsed": { "type": "integer" },
+        "dailyQuotaDate": { "type": "string" },
+        "dailyRequestsUsed": { "type": "integer" },
+        "dailyRequestLimit": { "type": "integer" },
+        "dailyTokensUsed": { "type": "integer" },
         "preferredChatModel": {
           "type": "string",
-          "enum": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-argon"]
+          "enum": ["gemini-3.5-flash-lite"]
         },
         "preferredTemperature": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" },
@@ -28,6 +32,10 @@
         "totalMessages",
         "totalImages",
         "totalTokensUsed",
+        "dailyQuotaDate",
+        "dailyRequestsUsed",
+        "dailyRequestLimit",
+        "dailyTokensUsed",
         "preferredChatModel",
         "preferredTemperature",
         "createdAt",
@@ -43,7 +51,7 @@
         "title": { "type": "string" },
         "modelName": {
           "type": "string",
-          "enum": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-argon"]
+          "enum": ["gemini-3.5-flash-lite"]
         },
         "personaId": { "type": "string" },
         "systemPromptOverride": { "type": "string" },
@@ -69,7 +77,7 @@
     },
     "ChatMessageRecord": {
       "title": "ChatMessageRecord",
-      "description": "A single message in a user's AI conversation with real token & latency telemetry.",
+      "description": "A single message in a user's AI conversation with token & latency telemetry.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -97,39 +105,9 @@
         "createdAt"
       ]
     },
-    "ImageCreation": {
-      "title": "ImageCreation",
-      "description": "Metadata record of an AI-generated or edited image.",
-      "type": "object",
-      "properties": {
-        "userId": { "type": "string" },
-        "prompt": { "type": "string" },
-        "negativePrompt": { "type": "string" },
-        "stylePreset": { "type": "string" },
-        "aspectRatio": { "type": "string" },
-        "modelName": {
-          "type": "string",
-          "enum": ["gemini-nano-banana-2.1", "gemini-3-pro-image"]
-        },
-        "localFileName": { "type": "string" },
-        "editedFromSource": { "type": "boolean" },
-        "latencyMs": { "type": "integer" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": [
-        "userId",
-        "prompt",
-        "stylePreset",
-        "aspectRatio",
-        "modelName",
-        "editedFromSource",
-        "latencyMs",
-        "createdAt"
-      ]
-    },
     "CustomAssistant": {
       "title": "CustomAssistant",
-      "description": "User-created custom AI agent with system instructions and model parameters.",
+      "description": "User-created custom AI agent with system instructions and parameters.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -138,7 +116,7 @@
         "systemPrompt": { "type": "string" },
         "modelName": {
           "type": "string",
-          "enum": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-argon"]
+          "enum": ["gemini-3.5-flash-lite"]
         },
         "temperature": { "type": "number" },
         "usageCount": { "type": "integer" },
@@ -180,11 +158,11 @@
     },
     "UsageLog": {
       "title": "UsageLog",
-      "description": "Real API call telemetry ledger recording token counts and latency.",
+      "description": "Usage telemetry ledger recording token counts and latency.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
-        "serviceType": { "type": "string", "enum": ["chat", "image", "optimizer"] },
+        "serviceType": { "type": "string", "enum": ["chat", "optimizer"] },
         "modelName": { "type": "string" },
         "promptTokens": { "type": "integer" },
         "completionTokens": { "type": "integer" },
@@ -207,7 +185,7 @@
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
-      "description": "User profile and cumulative AI telemetry."
+      "description": "User profile, daily quota, and cumulative usage telemetry."
     },
     "/users/{userId}/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/Conversation" },
@@ -216,10 +194,6 @@
     "/users/{userId}/conversations/{conversationId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ChatMessageRecord" },
       "description": "Messages inside an AI chat conversation."
-    },
-    "/users/{userId}/imageCreations/{creationId}": {
-      "schema": { "$ref": "#/entities/ImageCreation" },
-      "description": "AI image generation history."
     },
     "/users/{userId}/assistants/{assistantId}": {
       "schema": { "$ref": "#/entities/CustomAssistant" },
@@ -231,7 +205,7 @@
     },
     "/users/{userId}/usageLogs/{logId}": {
       "schema": { "$ref": "#/entities/UsageLog" },
-      "description": "Real API usage and token telemetry ledger."
+      "description": "Usage and token telemetry ledger."
     }
   }
 }

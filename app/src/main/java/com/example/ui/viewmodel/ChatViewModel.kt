@@ -12,19 +12,21 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.data.model.AiChatModel
 import com.example.data.model.AiPersona
 import com.example.data.model.AiPersonas
+import com.example.data.model.AiResponseMode
 import com.example.data.model.ChatMessageRecord
 import com.example.data.model.Conversation
 import com.example.data.model.CustomAssistant
+import com.example.data.model.DailyQuotaExceededException
 import com.example.data.model.UiState
+import com.example.data.model.UserProfile
 import com.example.data.repository.ChatStreamEvent
 import com.example.data.repository.FirestoreRepository
 import com.example.data.repository.GeminiAiRepository
-import com.google.firebase.ai.type.QuotaExceededException
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +37,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModel(
@@ -46,7 +49,7 @@ class ChatViewModel(
     private val _selectedConversationId = MutableStateFlow<String?>(null)
     val selectedConversationId: StateFlow<String?> = _selectedConversationId.asStateFlow()
 
-    private val _selectedModel = MutableStateFlow(AiChatModel.FLASH_3_8)
+    private val _selectedModel = MutableStateFlow(AiChatModel.FLASH_LITE_3_5)
     val selectedModel: StateFlow<AiChatModel> = _selectedModel.asStateFlow()
 
     private val _selectedPersona = MutableStateFlow(AiPersonas.all.first())
@@ -64,6 +67,9 @@ class ChatViewModel(
     private val _streamingReply = MutableStateFlow<String?>(null)
     val streamingReply: StateFlow<String?> = _streamingReply.asStateFlow()
 
+    private val _retryStatus = MutableStateFlow<String?>(null)
+    val retryStatus: StateFlow<String?> = _retryStatus.asStateFlow()
+
     private val _isSending = MutableStateFlow(false)
     val isSending: StateFlow<Boolean> = _isSending.asStateFlow()
 
@@ -74,6 +80,22 @@ class ChatViewModel(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private var activeStreamJob: Job? = null
+
+    val userProfile: StateFlow<UserProfile?> =
+        firestoreRepo.observeUserProfile(currentUserId)
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                Log.w(TAG, "Error observing profile in ChatVM", error)
+                emit(null)
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000L),
+                initialValue = null
+            )
 
     val conversationsState: StateFlow<UiState<List<Conversation>>> =
         firestoreRepo.observeConversations(currentUserId)
@@ -123,9 +145,10 @@ class ChatViewModel(
         _selectedConversationId.value = conversation.id
         _selectedModel.value = AiChatModel.fromId(conversation.modelName)
         _selectedPersona.value = AiPersonas.byId(conversation.personaId)
-        _temperature.value = conversation.temperature.toFloat().coerceIn(0f, 2f)
+        _temperature.value = conversation.temperature.toFloat().coerceIn(0f, 1.5f)
         _systemPromptOverride.value = conversation.systemPromptOverride.orEmpty()
         _streamingReply.value = null
+        _retryStatus.value = null
         _isSending.value = false
         _errorMessage.value = null
     }
@@ -140,6 +163,7 @@ class ChatViewModel(
         _systemPromptOverride.value = if (chosen.isCustom) chosen.systemPrompt else ""
         _prefillDraft.value = initialPrompt
         _streamingReply.value = null
+        _retryStatus.value = null
         _isSending.value = false
         _errorMessage.value = null
     }
@@ -155,8 +179,8 @@ class ChatViewModel(
         _prefillDraft.value = null
     }
 
-    fun selectModel(model: AiChatModel) {
-        _selectedModel.value = model
+    fun selectResponseMode(mode: AiResponseMode) {
+        updateParameters(mode.temperature, _systemPromptOverride.value)
     }
 
     fun selectPersona(persona: AiPersona) {
@@ -230,6 +254,7 @@ class ChatViewModel(
         activeStreamJob?.cancel()
         activeStreamJob = null
         _streamingReply.value = null
+        _retryStatus.value = null
         _isSending.value = false
     }
 
@@ -249,10 +274,17 @@ class ChatViewModel(
         activeStreamJob = viewModelScope.launch {
             _isSending.value = true
             _errorMessage.value = null
+            _retryStatus.value = null
             _attachedBitmap.value = null
             _streamingReply.value = ""
 
+            var reservedQuotaDate: String? = null
+            var receivedOutput = false
+
             try {
+                val quotaReservation = firestoreRepo.consumeDailyQuotaIfAvailable().getOrThrow()
+                reservedQuotaDate = quotaReservation.quotaDateUtc
+
                 var convId = _selectedConversationId.value
                 val isFirstMessage = convId == null
 
@@ -284,21 +316,30 @@ class ChatViewModel(
                     temperature = effectiveTemp,
                     history = currentHistory,
                     userPrompt = effectivePrompt,
-                    attachedBitmap = bitmapToSend
+                    attachedBitmap = bitmapToSend,
+                    onFirstChunk = { receivedOutput = true }
                 )
-            } catch (e: TimeoutCancellationException) {
-                Log.e(TAG, "Chat streaming timed out", e)
-                _errorMessage.value = "زمان پاسخ‌گویی مدل به پایان رسید (۶۰ ثانیه). لطفاً دوباره تلاش کنید."
-            } catch (e: QuotaExceededException) {
-                Log.e(TAG, "Chat quota exceeded", e)
-                _errorMessage.value = "سقف مجاز استفاده از مدل هوش مصنوعی پر شده است."
+            } catch (e: DailyQuotaExceededException) {
+                Log.w(TAG, "Daily quota reached", e)
+                _errorMessage.value = e.message ?: "سهمیه روزانه شما به پایان رسیده است."
             } catch (e: CancellationException) {
+                if (!receivedOutput && reservedQuotaDate != null) {
+                    withContext(NonCancellable) {
+                        firestoreRepo.refundDailyQuotaUnit(reservedQuotaDate)
+                    }
+                }
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Chat message failed", e)
+                if (!receivedOutput && reservedQuotaDate != null) {
+                    withContext(NonCancellable) {
+                        firestoreRepo.refundDailyQuotaUnit(reservedQuotaDate)
+                    }
+                }
                 _errorMessage.value = e.localizedMessage ?: "ارسال پیام به هوش مصنوعی با خطا مواجه شد."
             } finally {
                 _streamingReply.value = null
+                _retryStatus.value = null
                 _isSending.value = false
                 activeStreamJob = null
             }
@@ -323,8 +364,16 @@ class ChatViewModel(
         activeStreamJob = viewModelScope.launch {
             _isSending.value = true
             _errorMessage.value = null
+            _retryStatus.value = null
             _streamingReply.value = ""
+
+            var reservedQuotaDate: String? = null
+            var receivedOutput = false
+
             try {
+                val quotaReservation = firestoreRepo.consumeDailyQuotaIfAvailable().getOrThrow()
+                reservedQuotaDate = quotaReservation.quotaDateUtc
+
                 if (lastModelMsg != null) {
                     firestoreRepo.deleteMessage(convId, lastModelMsg.id)
                 }
@@ -335,18 +384,28 @@ class ChatViewModel(
                     temperature = effectiveTemp,
                     history = historyBeforeUser,
                     userPrompt = lastUserMsg.text,
-                    attachedBitmap = null
+                    attachedBitmap = null,
+                    onFirstChunk = { receivedOutput = true }
                 )
-            } catch (e: TimeoutCancellationException) {
-                _errorMessage.value = "زمان تولید مجدد پاسخ به پایان رسید."
-            } catch (e: QuotaExceededException) {
-                _errorMessage.value = "سقف مجاز استفاده از مدل پر شده است."
+            } catch (e: DailyQuotaExceededException) {
+                _errorMessage.value = e.message ?: "سهمیه روزانه شما به پایان رسیده است."
             } catch (e: CancellationException) {
+                if (!receivedOutput && reservedQuotaDate != null) {
+                    withContext(NonCancellable) {
+                        firestoreRepo.refundDailyQuotaUnit(reservedQuotaDate)
+                    }
+                }
                 throw e
             } catch (e: Exception) {
+                if (!receivedOutput && reservedQuotaDate != null) {
+                    withContext(NonCancellable) {
+                        firestoreRepo.refundDailyQuotaUnit(reservedQuotaDate)
+                    }
+                }
                 _errorMessage.value = e.localizedMessage ?: "تولید مجدد پاسخ ناموفق بود."
             } finally {
                 _streamingReply.value = null
+                _retryStatus.value = null
                 _isSending.value = false
                 activeStreamJob = null
             }
@@ -360,7 +419,8 @@ class ChatViewModel(
         temperature: Float,
         history: List<ChatMessageRecord>,
         userPrompt: String,
-        attachedBitmap: Bitmap?
+        attachedBitmap: Bitmap?,
+        onFirstChunk: () -> Unit
     ) {
         var completedEvent: ChatStreamEvent.Completed? = null
         geminiRepo.streamChatReply(
@@ -372,8 +432,20 @@ class ChatViewModel(
             attachedBitmap = attachedBitmap
         ).collect { event ->
             when (event) {
-                is ChatStreamEvent.Partial -> _streamingReply.value = event.accumulatedText
-                is ChatStreamEvent.Completed -> completedEvent = event
+                is ChatStreamEvent.Retrying -> {
+                    _retryStatus.value =
+                        "ترافیک سرور بالاست — تلاش مجدد (${event.attempt} از ${event.maxAttempts})..."
+                }
+                is ChatStreamEvent.Partial -> {
+                    _retryStatus.value = null
+                    onFirstChunk()
+                    _streamingReply.value = event.accumulatedText
+                }
+                is ChatStreamEvent.Completed -> {
+                    _retryStatus.value = null
+                    onFirstChunk()
+                    completedEvent = event
+                }
             }
         }
 
@@ -398,12 +470,9 @@ class ChatViewModel(
         sb.appendLine("# $title")
         sb.appendLine()
         for (msg in messages) {
-            val speaker = if (msg.role == "user") "کاربر" else "نوا هوش (${msg.modelName ?: "Gemini"})"
+            val speaker = if (msg.role == "user") "کاربر" else "نوا هوش"
             sb.appendLine("### $speaker")
             sb.appendLine(msg.text)
-            if (msg.role == "model" && msg.totalTokens > 0L) {
-                sb.appendLine("> Tokens: ${msg.totalTokens} | Latency: ${msg.latencyMs}ms")
-            }
             sb.appendLine()
         }
         return sb.toString()

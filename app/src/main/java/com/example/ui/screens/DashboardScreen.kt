@@ -31,9 +31,9 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DataUsage
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Token
@@ -45,11 +45,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,16 +70,18 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.R
-import com.example.data.model.AiChatModel
 import com.example.data.model.AiPersona
 import com.example.data.model.AiPersonas
 import com.example.data.model.Conversation
 import com.example.data.model.CustomAssistant
-import com.example.data.model.ImageCreation
+import com.example.data.model.DEFAULT_DAILY_REQUEST_LIMIT
+import com.example.data.model.QuotaDateHelper
 import com.example.data.model.UiState
 import com.example.data.model.UsageLog
+import com.example.ui.theme.AmberSpark
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.viewmodel.DashboardViewModel
+import java.util.Locale
 
 @Composable
 fun DashboardScreen(
@@ -87,20 +91,21 @@ fun DashboardScreen(
     onOpenNewChat: (AiPersona?) -> Unit,
     onOpenCustomAssistantChat: (CustomAssistant) -> Unit,
     onOpenConversation: (Conversation) -> Unit,
-    onOpenImageStudio: () -> Unit,
     onOpenAgentsHub: () -> Unit
 ) {
     val profileState by viewModel.profileState.collectAsStateWithLifecycle()
     val conversationsState by viewModel.conversationsState.collectAsStateWithLifecycle()
-    val creationsState by viewModel.creationsState.collectAsStateWithLifecycle()
     val usageLogsState by viewModel.usageLogsState.collectAsStateWithLifecycle()
     val assistantsState by viewModel.assistantsState.collectAsStateWithLifecycle()
 
     val profile = (profileState as? UiState.Success)?.data
-    val conversations = (conversationsState as? UiState.Success)?.data ?: emptyList()
-    val creations = (creationsState as? UiState.Success)?.data ?: emptyList()
     val usageLogs = (usageLogsState as? UiState.Success)?.data ?: emptyList()
     val customAssistants = (assistantsState as? UiState.Success)?.data ?: emptyList()
+
+    val todayUtc = remember { QuotaDateHelper.todayUtc() }
+    val dailyUsed = profile?.effectiveDailyUsed(todayUtc) ?: 0L
+    val dailyLimit = profile?.effectiveDailyLimit() ?: DEFAULT_DAILY_REQUEST_LIMIT
+    val dailyRemaining = profile?.remainingDailyRequests(todayUtc) ?: dailyLimit
 
     val avgLatencyMs = if (usageLogs.isNotEmpty()) {
         usageLogs.map { it.latencyMs }.average().toLong()
@@ -120,24 +125,32 @@ fun DashboardScreen(
             item {
                 DashboardHeader(
                     displayName = profile?.displayName ?: userDisplayName,
-                    photoUrl = profile?.photoUrl ?: userPhotoUrl,
-                    activeModel = AiChatModel.fromId(profile?.preferredChatModel)
+                    photoUrl = profile?.photoUrl ?: userPhotoUrl
                 )
             }
 
             item {
                 HeroCommandCard(
                     onStartChat = { onOpenNewChat(null) },
-                    onStartImage = onOpenImageStudio
+                    onOpenAgents = onOpenAgentsHub
+                )
+            }
+
+            item {
+                DailyQuotaCard(
+                    used = dailyUsed,
+                    limit = dailyLimit,
+                    remaining = dailyRemaining
                 )
             }
 
             item {
                 RealTelemetryKpiGrid(
                     totalTokens = profile?.totalTokensUsed ?: usageLogs.sumOf { it.totalTokens },
-                    totalCalls = (profile?.totalMessages ?: 0L) + (profile?.totalImages ?: 0L),
+                    totalMessages = profile?.totalMessages ?: 0L,
                     avgLatencyMs = avgLatencyMs,
-                    totalImages = profile?.totalImages ?: creations.size.toLong()
+                    remainingToday = dailyRemaining,
+                    dailyLimit = dailyLimit
                 )
             }
 
@@ -184,8 +197,8 @@ fun DashboardScreen(
             if (usageLogs.isNotEmpty()) {
                 item {
                     SectionHeader(
-                        title = "گزارش زنده تراکنش‌های API",
-                        subtitle = "ثبت دقیق توکن و زمان پاسخ هر درخواست"
+                        title = "فعالیت‌های اخیر حساب",
+                        subtitle = "گزارش زمان پاسخ و حجم پردازش درخواست‌ها"
                     )
                 }
                 items(usageLogs.take(4), key = { "log_${it.id}" }) { log ->
@@ -196,7 +209,7 @@ fun DashboardScreen(
             item {
                 SectionHeader(
                     title = "گفتگوهای اخیر ابری",
-                    subtitle = "همگام‌سازی لحظه‌ای با Firestore"
+                    subtitle = "دسترسی سریع و همگام در تمام دستگاه‌ها"
                 )
             }
 
@@ -251,8 +264,7 @@ fun DashboardScreen(
 @Composable
 private fun DashboardHeader(
     displayName: String,
-    photoUrl: String?,
-    activeModel: AiChatModel
+    photoUrl: String?
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -288,14 +300,14 @@ private fun DashboardHeader(
             Spacer(modifier = Modifier.width(12.dp))
             Column {
                 Text(
-                    text = "فضای کاری $displayName",
+                    text = "خوش آمدید، $displayName",
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onBackground,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "موتور پیش‌فرض: ${activeModel.titleFa} (${activeModel.contextInfo})",
+                    text = "پلتفرم هوشمند نوا • آماده پاسخ‌گویی",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -319,7 +331,7 @@ private fun DashboardHeader(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "API فعال",
+                    text = "آنلاین",
                     style = MaterialTheme.typography.labelMedium,
                     color = EmeraldSuccess
                 )
@@ -331,7 +343,7 @@ private fun DashboardHeader(
 @Composable
 private fun HeroCommandCard(
     onStartChat: () -> Unit,
-    onStartImage: () -> Unit
+    onOpenAgents: () -> Unit
 ) {
     Card(
         shape = MaterialTheme.shapes.extraLarge,
@@ -379,7 +391,7 @@ private fun HeroCommandCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Gemini 3.8 • 4 Argon • Nano Banana 2.1",
+                            text = "نسخه حرفه‌ای • پردازش سریع و پایدار",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFFA5F3FC)
                         )
@@ -387,14 +399,14 @@ private fun HeroCommandCard(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "کنسول عملیاتی هوش مصنوعی",
+                    text = "دستیار هوشمند جامع",
                     style = MaterialTheme.typography.headlineMedium,
                     color = Color.White,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "اجرای استریم مدل‌های زبانی، مهندسی پرامپت ساختاریافته و رندر تصویر با پایش لحظه‌ای توکن",
+                    text = "گفتگوی تحلیلی، درک تصاویر، نگارش جداول و کدنویسی با دستیارهای اختصاصی",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFFCBD5E1)
                 )
@@ -421,10 +433,10 @@ private fun HeroCommandCard(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("ورک‌اسپیس چت", style = MaterialTheme.typography.labelLarge)
+                        Text("گفتگوی جدید", style = MaterialTheme.typography.labelLarge)
                     }
                     FilledTonalButton(
-                        onClick = onStartImage,
+                        onClick = onOpenAgents,
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = Color(0xFF1E293B).copy(alpha = 0.9f),
                             contentColor = Color.White
@@ -433,15 +445,15 @@ private fun HeroCommandCard(
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp)
-                            .testTag("dash_new_image_btn")
+                            .testTag("dash_open_agents_btn")
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Image,
+                            imageVector = Icons.Filled.SmartToy,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("استودیو تصویر", style = MaterialTheme.typography.labelLarge)
+                        Text("دستیارها و پرامپت", style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -450,11 +462,95 @@ private fun HeroCommandCard(
 }
 
 @Composable
+private fun DailyQuotaCard(
+    used: Long,
+    limit: Long,
+    remaining: Long
+) {
+    val progress = (used.toFloat() / limit.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+    val accentColor = when {
+        remaining == 0L -> MaterialTheme.colorScheme.error
+        remaining <= 5L -> AmberSpark
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Schedule,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "سهمیه روزانه حساب",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = accentColor.copy(alpha = 0.14f)
+                ) {
+                    Text(
+                        text = "$remaining باقی‌مانده",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = accentColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            LinearProgressIndicator(
+                progress = { progress },
+                color = accentColor,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(CircleShape)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "مصرف امروز: $used از $limit درخواست",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "تمدید خودکار روزانه",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun RealTelemetryKpiGrid(
     totalTokens: Long,
-    totalCalls: Long,
+    totalMessages: Long,
     avgLatencyMs: Long,
-    totalImages: Long
+    remainingToday: Long,
+    dailyLimit: Long
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
@@ -462,15 +558,17 @@ private fun RealTelemetryKpiGrid(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             KpiCard(
-                label = "کل توکن مصرفی",
+                label = "حجم کل پردازش",
                 value = formatCompactNumber(totalTokens),
                 icon = Icons.Filled.Token,
                 accent = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f)
             )
             KpiCard(
-                label = "میانگین تاخیر پاسخ",
-                value = if (avgLatencyMs > 0L) "${avgLatencyMs}ms" else "—",
+                label = "سرعت پاسخ‌دهی",
+                value = if (avgLatencyMs > 0L) {
+                    "${String.format(Locale.US, "%.1f", avgLatencyMs / 1000.0)}s"
+                } else "—",
                 icon = Icons.Filled.Speed,
                 accent = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.weight(1f)
@@ -481,16 +579,16 @@ private fun RealTelemetryKpiGrid(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             KpiCard(
-                label = "کل پردازش‌های ثبت‌شده",
-                value = totalCalls.toString(),
+                label = "کل پیام‌های ثبت‌شده",
+                value = totalMessages.toString(),
                 icon = Icons.Filled.Bolt,
                 accent = EmeraldSuccess,
                 modifier = Modifier.weight(1f)
             )
             KpiCard(
-                label = "تصاویر رندرشده",
-                value = totalImages.toString(),
-                icon = Icons.Filled.Brush,
+                label = "اعتبار امروز",
+                value = "$remainingToday/$dailyLimit",
+                icon = Icons.Filled.AutoAwesome,
                 accent = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.weight(1f)
             )
@@ -578,13 +676,13 @@ private fun RealUsageTelemetryCard(usageLogs: List<UsageLog>) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "نمودار واقعی مصرف توکن و درخواست‌ها",
+                        text = "روند مصرف اخیر",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
                 Text(
-                    text = "${usageLogs.size} فراخوانی",
+                    text = "${usageLogs.size} فعالیت",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -600,7 +698,7 @@ private fun RealUsageTelemetryCard(usageLogs: List<UsageLog>) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "هنوز فراخوانی API ثبت نشده است. اولین پیام یا تصویر را بسازید تا نمودار واقعی رسم شود.",
+                        text = "هنوز فعالیتی ثبت نشده است. اولین گفتگوی خود را آغاز کنید.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -643,24 +741,6 @@ private fun RealUsageTelemetryCard(usageLogs: List<UsageLog>) {
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(10.dp))
-                val modelCounts = usageLogs.groupingBy { it.modelName }.eachCount()
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(modelCounts.entries.toList(), key = { it.key }) { entry ->
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Text(
-                                text = "${entry.key}: ${entry.value}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
             }
         }
     }
@@ -681,28 +761,27 @@ private fun UsageLogRow(log: UsageLog) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = log.modelName,
+                    text = when (log.serviceType) {
+                        "optimizer" -> "بهینه‌سازی پرامپت"
+                        else -> "گفتگوی هوشمند"
+                    },
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = when (log.serviceType) {
-                        "image" -> "تولید تصویر"
-                        "optimizer" -> "بهینه‌سازی پرامپت"
-                        else -> "چت هوشمند"
-                    },
+                    text = "پردازش با موتور سریع نوا",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = if (log.totalTokens > 0L) "${log.totalTokens} tok" else "Image",
+                    text = if (log.totalTokens > 0L) "${log.totalTokens} واحد" else "ثبت‌شده",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "${log.latencyMs}ms",
+                    text = "${String.format(Locale.US, "%.1f", log.latencyMs / 1000.0)}s",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -939,7 +1018,7 @@ private fun EmptyRecentCard(onStartChat: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "اولین گفتگوی خود را با جمینای ۳.۸ شروع کنید تا با آمار توکن در ابر ذخیره شود.",
+                text = "اولین گفتگوی خود را شروع کنید تا در حساب ابری شما ذخیره شود.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -953,8 +1032,8 @@ private fun EmptyRecentCard(onStartChat: () -> Unit) {
 
 private fun formatCompactNumber(value: Long): String {
     return when {
-        value >= 1_000_000L -> String.format("%.1fM", value / 1_000_000.0)
-        value >= 1_000L -> String.format("%.1fK", value / 1_000.0)
+        value >= 1_000_000L -> String.format(Locale.US, "%.1fM", value / 1_000_000.0)
+        value >= 1_000L -> String.format(Locale.US, "%.1fK", value / 1_000.0)
         else -> value.toString()
     }
 }

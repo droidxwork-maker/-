@@ -62,7 +62,11 @@ test("Unauthenticated user: denied across all collections", async () => {
       totalMessages: 0,
       totalImages: 0,
       totalTokensUsed: 0,
-      preferredChatModel: "gemini-3.8-flash",
+      dailyQuotaDate: "2026-11-25",
+      dailyRequestsUsed: 0,
+      dailyRequestLimit: 50,
+      dailyTokensUsed: 0,
+      preferredChatModel: "gemini-3.5-flash-lite",
       preferredTemperature: 0.7,
       createdAt: past,
       updatedAt: past,
@@ -70,7 +74,7 @@ test("Unauthenticated user: denied across all collections", async () => {
   );
 });
 
-test("UserProfile: create, token & temperature updates, and security bounds", async () => {
+test("UserProfile: create, daily quota limits, token updates, and tamper protection", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const created = new Date(Date.now() - 10000);
 
@@ -84,25 +88,61 @@ test("UserProfile: create, token & temperature updates, and security bounds", as
       totalMessages: 0,
       totalImages: 0,
       totalTokensUsed: 0,
-      preferredChatModel: "gemini-3.8-flash",
+      dailyQuotaDate: "2026-11-25",
+      dailyRequestsUsed: 0,
+      dailyRequestLimit: 50,
+      dailyTokensUsed: 0,
+      preferredChatModel: "gemini-3.5-flash-lite",
       preferredTemperature: 0.7,
       createdAt: created,
       updatedAt: created,
     })
   );
 
+  // Consume quota unit within daily limit
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      dailyQuotaDate: "2026-11-25",
+      dailyRequestsUsed: 1,
+      dailyTokensUsed: 0,
+      updatedAt: new Date(Date.now() - 2000),
+    })
+  );
+
+  // Update message and token counters
   await assertSucceeds(
     aliceDb.collection("users").doc(ALICE_UID).update({
       totalMessages: 1,
       totalTokensUsed: 340,
+      dailyTokensUsed: 340,
       updatedAt: new Date(Date.now() - 1000),
     })
   );
 
-  await assertSucceeds(
+  // Reject exceeding dailyRequestLimit
+  await assertFails(
     aliceDb.collection("users").doc(ALICE_UID).update({
-      preferredTemperature: 1.1,
+      dailyRequestsUsed: 51,
       updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Reject client attempting to raise its own dailyRequestLimit
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      dailyQuotaDate: "2026-11-25",
+      dailyRequestsUsed: 1,
+      dailyRequestLimit: 500,
+      dailyTokensUsed: 0,
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+
+  // Reject removed legacy models
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      preferredChatModel: "gemini-4-argon",
+      updatedAt: new Date(Date.now() - 350),
     })
   );
 
@@ -123,10 +163,31 @@ test("UserProfile: create, token & temperature updates, and security bounds", as
   );
 });
 
-test("Conversations & Messages: pin, rename, params update, and telemetry fields", async () => {
+test("Conversations & Messages: create with gemini-3.5-flash-lite, pin, rename, and isolation", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const created = new Date(Date.now() - 10000);
+
+  // Reject deprecated/removed models on conversation creation
+  await assertFails(
+    aliceDb
+      .collection("users")
+      .doc(ALICE_UID)
+      .collection("conversations")
+      .doc("conv_bad")
+      .set({
+        userId: ALICE_UID,
+        title: "مدل قدیمی",
+        modelName: "gemini-3.8-flash",
+        personaId: "general",
+        temperature: 0.7,
+        pinned: false,
+        lastMessagePreview: "",
+        messageCount: 0,
+        createdAt: created,
+        updatedAt: created,
+      })
+  );
 
   await assertSucceeds(
     aliceDb
@@ -137,7 +198,7 @@ test("Conversations & Messages: pin, rename, params update, and telemetry fields
       .set({
         userId: ALICE_UID,
         title: "معماری میکروسرویس",
-        modelName: "gemini-4-argon",
+        modelName: "gemini-3.5-flash-lite",
         personaId: "coder",
         temperature: 0.4,
         pinned: false,
@@ -148,7 +209,6 @@ test("Conversations & Messages: pin, rename, params update, and telemetry fields
       })
   );
 
-  // Pin and rename
   await assertSucceeds(
     aliceDb
       .collection("users")
@@ -167,18 +227,6 @@ test("Conversations & Messages: pin, rename, params update, and telemetry fields
       .doc(ALICE_UID)
       .collection("conversations")
       .doc("conv_1")
-      .update({
-        title: "معماری نهایی",
-        updatedAt: new Date(Date.now() - 3000),
-      })
-  );
-
-  await assertSucceeds(
-    aliceDb
-      .collection("users")
-      .doc(ALICE_UID)
-      .collection("conversations")
-      .doc("conv_1")
       .collection("messages")
       .doc("msg_1")
       .set({
@@ -186,7 +234,7 @@ test("Conversations & Messages: pin, rename, params update, and telemetry fields
         conversationId: "conv_1",
         role: "model",
         text: "پاسخ فنی معماری...",
-        modelName: "gemini-4-argon",
+        modelName: "gemini-3.5-flash-lite",
         hasImageAttachment: false,
         promptTokens: 120,
         completionTokens: 250,
@@ -206,22 +254,11 @@ test("Conversations & Messages: pin, rename, params update, and telemetry fields
   );
 });
 
-test("Custom Assistants, Saved Prompts, Image Creations & UsageLogs", async () => {
+test("Custom Assistants, Saved Prompts & UsageLogs: CRUD and isolation", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const created = new Date(Date.now() - 5000);
 
-  await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).collection("assistants").get()
-  );
-  await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).collection("prompts").get()
-  );
-  await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).collection("usageLogs").get()
-  );
-
-  // Custom Assistant CRUD
   await assertSucceeds(
     aliceDb
       .collection("users")
@@ -233,7 +270,7 @@ test("Custom Assistants, Saved Prompts, Image Creations & UsageLogs", async () =
         name: "معمار اندروید",
         roleDescription: "متخصص Jetpack Compose و کاتلین",
         systemPrompt: "همیشه کدهای استاندارد و بهینه ارائه بده.",
-        modelName: "gemini-3.8-flash",
+        modelName: "gemini-3.5-flash-lite",
         temperature: 0.5,
         usageCount: 0,
         createdAt: created,
@@ -241,19 +278,6 @@ test("Custom Assistants, Saved Prompts, Image Creations & UsageLogs", async () =
       })
   );
 
-  await assertSucceeds(
-    aliceDb
-      .collection("users")
-      .doc(ALICE_UID)
-      .collection("assistants")
-      .doc("asst_1")
-      .update({
-        usageCount: 1,
-        updatedAt: new Date(Date.now() - 1000),
-      })
-  );
-
-  // Saved Prompt CRUD
   await assertSucceeds(
     aliceDb
       .collection("users")
@@ -270,7 +294,6 @@ test("Custom Assistants, Saved Prompts, Image Creations & UsageLogs", async () =
       })
   );
 
-  // Usage Log
   await assertSucceeds(
     aliceDb
       .collection("users")
@@ -280,7 +303,7 @@ test("Custom Assistants, Saved Prompts, Image Creations & UsageLogs", async () =
       .set({
         userId: ALICE_UID,
         serviceType: "chat",
-        modelName: "gemini-3.8-flash",
+        modelName: "gemini-3.5-flash-lite",
         promptTokens: 85,
         completionTokens: 210,
         totalTokens: 295,
@@ -289,28 +312,25 @@ test("Custom Assistants, Saved Prompts, Image Creations & UsageLogs", async () =
       })
   );
 
-  // Image Creation
-  await assertSucceeds(
+  // Reject retired image service type in UsageLogs
+  await assertFails(
     aliceDb
       .collection("users")
       .doc(ALICE_UID)
-      .collection("imageCreations")
-      .doc("img_1")
+      .collection("usageLogs")
+      .doc("log_bad")
       .set({
         userId: ALICE_UID,
-        prompt: "نمای شبانه برج مدرن",
-        negativePrompt: "تاری، نویز",
-        stylePreset: "واقع‌گرایانه",
-        aspectRatio: "16:9",
+        serviceType: "image",
         modelName: "gemini-nano-banana-2.1",
-        localFileName: "img_1.png",
-        editedFromSource: false,
-        latencyMs: 18500,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        latencyMs: 1000,
         createdAt: created,
       })
   );
 
-  // Bob isolation check
   await assertFails(
     bobDb
       .collection("users")

@@ -28,15 +28,15 @@ service cloud.firestore {
     }
 
     function isValidChatModel(model) {
-      return model in ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-argon'];
-    }
-
-    function isValidImageModel(model) {
-      return model in ['gemini-nano-banana-2.1', 'gemini-3-pro-image'];
+      return model == 'gemini-3.5-flash-lite';
     }
 
     function isValidTemperature(t) {
       return t is number && t >= 0.0 && t <= 2.0;
+    }
+
+    function isValidQuotaDate(d) {
+      return d is string && d.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
     }
 
     function isValidUserProfile(data, userId) {
@@ -48,10 +48,24 @@ service cloud.firestore {
              data.totalMessages is int && data.totalMessages >= 0 &&
              data.totalImages is int && data.totalImages >= 0 &&
              (!('totalTokensUsed' in data) || (data.totalTokensUsed is int && data.totalTokensUsed >= 0)) &&
+             data.dailyQuotaDate is string && isValidQuotaDate(data.dailyQuotaDate) &&
+             data.dailyRequestsUsed is int && data.dailyRequestsUsed >= 0 &&
+             data.dailyRequestLimit is int && data.dailyRequestLimit >= 1 && data.dailyRequestLimit <= 500 &&
+             data.dailyRequestsUsed <= data.dailyRequestLimit &&
+             data.dailyTokensUsed is int && data.dailyTokensUsed >= 0 &&
              data.preferredChatModel is string && isValidChatModel(data.preferredChatModel) &&
              (!('preferredTemperature' in data) || isValidTemperature(data.preferredTemperature)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isQuotaLimitPreserved() {
+      return (!('dailyRequestLimit' in existing()) &&
+              'dailyRequestLimit' in incoming() &&
+              incoming().dailyRequestLimit == 50) ||
+             ('dailyRequestLimit' in existing() &&
+              'dailyRequestLimit' in incoming() &&
+              incoming().dailyRequestLimit == existing().dailyRequestLimit);
     }
 
     function isValidConversation(data, userId) {
@@ -82,19 +96,6 @@ service cloud.firestore {
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
-    function isValidImageCreation(data, userId) {
-      return data.userId is string && data.userId == userId &&
-             data.prompt is string && data.prompt.size() >= 1 && data.prompt.size() <= 1000 &&
-             (!('negativePrompt' in data) || (data.negativePrompt is string && data.negativePrompt.size() <= 500)) &&
-             data.stylePreset is string && data.stylePreset.size() >= 1 && data.stylePreset.size() <= 60 &&
-             data.aspectRatio is string && data.aspectRatio.size() >= 1 && data.aspectRatio.size() <= 20 &&
-             data.modelName is string && isValidImageModel(data.modelName) &&
-             (!('localFileName' in data) || (data.localFileName is string && data.localFileName.size() <= 200)) &&
-             data.editedFromSource is bool &&
-             (!('latencyMs' in data) || (data.latencyMs is int && data.latencyMs >= 0)) &&
-             data.createdAt is timestamp && data.createdAt <= request.time;
-    }
-
     function isValidCustomAssistant(data, userId) {
       return data.userId is string && data.userId == userId &&
              data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
@@ -118,7 +119,7 @@ service cloud.firestore {
 
     function isValidUsageLog(data, userId) {
       return data.userId is string && data.userId == userId &&
-             data.serviceType in ['chat', 'image', 'optimizer'] &&
+             data.serviceType in ['chat', 'optimizer'] &&
              data.modelName is string && data.modelName.size() >= 1 && data.modelName.size() <= 80 &&
              data.promptTokens is int && data.promptTokens >= 0 &&
              data.completionTokens is int && data.completionTokens >= 0 &&
@@ -127,15 +128,18 @@ service cloud.firestore {
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
-    // 1. User Profile Collection
+    // 1. User Profile & Daily Quota Collection
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
       allow list: if false;
 
       allow create: if isOwner(userId) &&
                        isValidId(userId) &&
-                       incoming().keys().hasAll(['userId', 'displayName', 'totalChats', 'totalMessages', 'totalImages', 'totalTokensUsed', 'preferredChatModel', 'preferredTemperature', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'totalChats', 'totalMessages', 'totalImages', 'totalTokensUsed', 'preferredChatModel', 'preferredTemperature', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'totalChats', 'totalMessages', 'totalImages', 'totalTokensUsed', 'dailyQuotaDate', 'dailyRequestsUsed', 'dailyRequestLimit', 'dailyTokensUsed', 'preferredChatModel', 'preferredTemperature', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'totalChats', 'totalMessages', 'totalImages', 'totalTokensUsed', 'dailyQuotaDate', 'dailyRequestsUsed', 'dailyRequestLimit', 'dailyTokensUsed', 'preferredChatModel', 'preferredTemperature', 'createdAt', 'updatedAt']) &&
+                       incoming().dailyRequestLimit == 50 &&
+                       incoming().dailyRequestsUsed == 0 &&
+                       incoming().dailyTokensUsed == 0 &&
                        isValidUserProfile(incoming(), userId);
 
       allow update: if isOwner(userId) &&
@@ -143,17 +147,21 @@ service cloud.firestore {
                        isValidUserProfile(incoming(), userId) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
+                       isQuotaLimitPreserved() &&
                        (
-                         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'preferredChatModel', 'preferredTemperature', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'preferredChatModel', 'dailyQuotaDate', 'dailyRequestsUsed', 'dailyRequestLimit', 'dailyTokensUsed', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'preferredChatModel', 'updatedAt']) ||
                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'updatedAt']) ||
                          incoming().diff(existing()).affectedKeys().hasOnly(['preferredChatModel', 'updatedAt']) ||
                          incoming().diff(existing()).affectedKeys().hasOnly(['preferredTemperature', 'updatedAt']) ||
-                         incoming().diff(existing()).affectedKeys().hasOnly(['totalChats', 'totalMessages', 'totalImages', 'totalTokensUsed', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['dailyQuotaDate', 'dailyRequestsUsed', 'dailyRequestLimit', 'dailyTokensUsed', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['dailyQuotaDate', 'dailyRequestsUsed', 'dailyTokensUsed', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['dailyRequestsUsed', 'updatedAt']) ||
                          incoming().diff(existing()).affectedKeys().hasOnly(['totalChats', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalMessages', 'totalTokensUsed', 'dailyTokensUsed', 'updatedAt']) ||
                          incoming().diff(existing()).affectedKeys().hasOnly(['totalMessages', 'totalTokensUsed', 'updatedAt']) ||
                          incoming().diff(existing()).affectedKeys().hasOnly(['totalMessages', 'updatedAt']) ||
-                         incoming().diff(existing()).affectedKeys().hasOnly(['totalImages', 'totalTokensUsed', 'updatedAt']) ||
-                         incoming().diff(existing()).affectedKeys().hasOnly(['totalImages', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalTokensUsed', 'dailyTokensUsed', 'updatedAt']) ||
                          incoming().diff(existing()).affectedKeys().hasOnly(['totalTokensUsed', 'updatedAt'])
                        );
 
@@ -180,6 +188,7 @@ service cloud.firestore {
                            incoming().diff(existing()).affectedKeys().hasOnly(['pinned', 'updatedAt']) ||
                            incoming().diff(existing()).affectedKeys().hasOnly(['modelName', 'updatedAt']) ||
                            incoming().diff(existing()).affectedKeys().hasOnly(['temperature', 'systemPromptOverride', 'updatedAt']) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['lastMessagePreview', 'messageCount', 'modelName', 'updatedAt']) ||
                            incoming().diff(existing()).affectedKeys().hasOnly(['lastMessagePreview', 'messageCount', 'updatedAt']) ||
                            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastMessagePreview', 'messageCount', 'modelName', 'updatedAt'])
                          );
@@ -204,22 +213,7 @@ service cloud.firestore {
         }
       }
 
-      // 4. Image Creations Subcollection
-      match /imageCreations/{creationId} {
-        allow get: if isOwner(userId) && isValidId(creationId);
-        allow list: if isOwner(userId);
-
-        allow create: if isOwner(userId) &&
-                         isValidId(creationId) &&
-                         incoming().keys().hasAll(['userId', 'prompt', 'stylePreset', 'aspectRatio', 'modelName', 'editedFromSource', 'latencyMs', 'createdAt']) &&
-                         incoming().keys().hasOnly(['userId', 'prompt', 'negativePrompt', 'stylePreset', 'aspectRatio', 'modelName', 'localFileName', 'editedFromSource', 'latencyMs', 'createdAt']) &&
-                         isValidImageCreation(incoming(), userId);
-
-        allow update: if false;
-        allow delete: if isOwner(userId) && isValidId(creationId);
-      }
-
-      // 5. Custom AI Assistants Subcollection
+      // 4. Custom AI Assistants Subcollection
       match /assistants/{assistantId} {
         allow get: if isOwner(userId) && isValidId(assistantId);
         allow list: if isOwner(userId);
@@ -243,7 +237,7 @@ service cloud.firestore {
         allow delete: if isOwner(userId) && isValidId(assistantId);
       }
 
-      // 6. Saved Prompt Templates Subcollection
+      // 5. Saved Prompt Templates Subcollection
       match /prompts/{promptId} {
         allow get: if isOwner(userId) && isValidId(promptId);
         allow list: if isOwner(userId);
@@ -264,7 +258,7 @@ service cloud.firestore {
         allow delete: if isOwner(userId) && isValidId(promptId);
       }
 
-      // 7. Usage Telemetry Ledger Subcollection
+      // 6. Usage Telemetry Ledger Subcollection
       match /usageLogs/{logId} {
         allow get: if isOwner(userId) && isValidId(logId);
         allow list: if isOwner(userId);

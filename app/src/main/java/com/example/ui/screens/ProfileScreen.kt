@@ -1,8 +1,6 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,18 +18,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Thermostat
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -58,8 +55,10 @@ import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.auth.signOut
-import com.example.data.model.AiChatModel
+import com.example.data.model.DEFAULT_DAILY_REQUEST_LIMIT
+import com.example.data.model.QuotaDateHelper
 import com.example.data.model.UiState
+import com.example.ui.theme.AmberSpark
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.viewmodel.DashboardViewModel
 import java.util.Locale
@@ -70,7 +69,6 @@ fun ProfileScreen(
     userDisplayName: String,
     userEmail: String?,
     userPhotoUrl: String?,
-    currentUserId: String,
     isDarkTheme: Boolean,
     onToggleTheme: (Boolean) -> Unit
 ) {
@@ -81,10 +79,20 @@ fun ProfileScreen(
     val profileState by dashboardViewModel.profileState.collectAsStateWithLifecycle()
     val actionError by dashboardViewModel.actionError.collectAsStateWithLifecycle()
     val profile = (profileState as? UiState.Success)?.data
-    val preferredModel = AiChatModel.fromId(profile?.preferredChatModel)
     val remoteTemp = (profile?.preferredTemperature ?: 0.7).toFloat().coerceIn(0f, 1.5f)
     var tempSlider by remember(remoteTemp) { mutableFloatStateOf(remoteTemp) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    val todayUtc = remember { QuotaDateHelper.todayUtc() }
+    val dailyUsed = profile?.effectiveDailyUsed(todayUtc) ?: 0L
+    val dailyLimit = profile?.effectiveDailyLimit() ?: DEFAULT_DAILY_REQUEST_LIMIT
+    val dailyRemaining = profile?.remainingDailyRequests(todayUtc) ?: dailyLimit
+    val quotaProgress = (dailyUsed.toFloat() / dailyLimit.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+    val quotaAccent = when {
+        dailyRemaining == 0L -> MaterialTheme.colorScheme.error
+        dailyRemaining <= 5L -> AmberSpark
+        else -> MaterialTheme.colorScheme.primary
+    }
 
     LaunchedEffect(actionError) {
         val err = actionError ?: return@LaunchedEffect
@@ -108,355 +116,328 @@ fun ProfileScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-            item {
-                Text(
-                    text = "پروفایل و تنظیمات پلتفرم",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+                item {
+                    Text(
+                        text = "حساب کاربری و تنظیمات",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-            // Account Header Card
-            item {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                // Account Header Card
+                item {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        if (!userPhotoUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = userPhotoUrl,
-                                contentDescription = "آواتار کاربر",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(64.dp)
-                                    .clip(CircleShape)
-                            )
-                        } else {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(64.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
+                        Row(
+                            modifier = Modifier.padding(18.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (!userPhotoUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = userPhotoUrl,
+                                    contentDescription = "آواتار کاربر",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(CircleShape)
+                                )
+                            } else {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(64.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = userDisplayName.firstOrNull()?.toString() ?: "ن",
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = profile?.displayName ?: userDisplayName,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (!userEmail.isNullOrBlank()) {
                                     Text(
-                                        text = userDisplayName.firstOrNull()?.toString() ?: "ن",
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
+                                        text = userEmail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Surface(
+                                    shape = CircleShape,
+                                    color = EmeraldSuccess.copy(alpha = 0.14f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Verified,
+                                            contentDescription = null,
+                                            tint = EmeraldSuccess,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "طرح استاندارد • همگام‌سازی ابری فعال",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = EmeraldSuccess
+                                        )
+                                    }
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = profile?.displayName ?: userDisplayName,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            if (!userEmail.isNullOrBlank()) {
-                                Text(
-                                    text = userEmail,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer
-                            ) {
-                                Text(
-                                    text = "UID: ${currentUserId.take(10)}...",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
                     }
                 }
-            }
 
-            // Real Account Consumption Telemetry
-            item {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.Speed,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "خلاصه مصرف واقعی حساب (Firestore)",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            ProfileStatPill(
-                                label = "توکن کل",
-                                value = "${profile?.totalTokensUsed ?: 0L}",
-                                modifier = Modifier.weight(1f)
-                            )
-                            ProfileStatPill(
-                                label = "گفتگوها",
-                                value = "${profile?.totalChats ?: 0L}",
-                                modifier = Modifier.weight(1f)
-                            )
-                            ProfileStatPill(
-                                label = "پیام‌ها",
-                                value = "${profile?.totalMessages ?: 0L}",
-                                modifier = Modifier.weight(1f)
-                            )
-                            ProfileStatPill(
-                                label = "تصاویر",
-                                value = "${profile?.totalImages ?: 0L}",
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Theme Toggle
-            item {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                // Daily Quota & Plan Card
+                item {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, quotaAccent.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "حالت نمایش تیره",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = if (isDarkTheme) "تم شبانه اوبسیدین فعال است" else "تم روز روشن فعال است",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Switch(
-                            checked = isDarkTheme,
-                            onCheckedChange = onToggleTheme,
-                            modifier = Modifier.testTag("profile_theme_switch")
-                        )
-                    }
-                }
-            }
-
-            // Preferred Model Selector (synced to Firestore)
-            item {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.Tune,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "مدل پیش‌فرض گفتگو (ذخیره ابری)",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        AiChatModel.entries.forEach { model ->
+                        Column(modifier = Modifier.padding(18.dp)) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(MaterialTheme.shapes.small)
-                                    .clickable {
-                                        dashboardViewModel.updatePreferredChatModel(model.modelId)
-                                    }
-                                    .padding(vertical = 8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                RadioButton(
-                                    selected = preferredModel == model,
-                                    onClick = {
-                                        dashboardViewModel.updatePreferredChatModel(model.modelId)
-                                    }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Schedule,
+                                        contentDescription = null,
+                                        tint = quotaAccent
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "سهمیه روزانه پاسخ‌گویی",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = "$dailyUsed / $dailyLimit",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = quotaAccent
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            LinearProgressIndicator(
+                                progress = { quotaProgress },
+                                color = quotaAccent,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(9.dp)
+                                    .clip(CircleShape)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "شما امروز می‌توانید $dailyRemaining درخواست دیگر ارسال کنید. این سهمیه هر ۲۴ ساعت به‌صورت خودکار بازنشانی می‌شود.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Account Consumption Summary
+                item {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(18.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Filled.Speed,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "آمار و عملکرد حساب",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                ProfileStatPill(
+                                    label = "سهمیه امروز",
+                                    value = "$dailyRemaining/$dailyLimit",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                ProfileStatPill(
+                                    label = "گفتگوها",
+                                    value = "${profile?.totalChats ?: 0L}",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                ProfileStatPill(
+                                    label = "پیام‌ها",
+                                    value = "${profile?.totalMessages ?: 0L}",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                ProfileStatPill(
+                                    label = "حجم پردازش",
+                                    value = "${profile?.totalTokensUsed ?: 0L}",
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Theme Toggle
+                item {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = model.titleFa,
-                                        style = MaterialTheme.typography.titleSmall
+                                        text = "حالت نمایش تیره",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
-                                        text = model.subtitleFa,
+                                        text = if (isDarkTheme) "تم شبانه فعال است" else "تم روز روشن فعال است",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
+                            Switch(
+                                checked = isDarkTheme,
+                                onCheckedChange = onToggleTheme,
+                                modifier = Modifier.testTag("profile_theme_switch")
+                            )
                         }
                     }
                 }
-            }
 
-            // Preferred Temperature Slider (synced to Firestore)
-            item {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Filled.Thermostat,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                // Default Temperature Slider
+                item {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(18.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Thermostat,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "تنظیم لحن و خلاقیت پیش‌فرض",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                                 Text(
-                                    text = "دمای پیش‌فرض استنتاج (Temperature)",
+                                    text = String.format(Locale.US, "%.1f", tempSlider),
                                     style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = String.format(Locale.US, "%.1f", tempSlider),
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                text = "مقادیر پایین‌تر (۰.۲) برای کدنویسی و دقت بالا؛ مقادیر بالاتر (۱.۰+) برای خلاقیت.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Slider(
+                                value = tempSlider,
+                                onValueChange = { tempSlider = it },
+                                onValueChangeFinished = {
+                                    dashboardViewModel.updatePreferredTemperature(
+                                        String.format(Locale.US, "%.1f", tempSlider).toDouble()
+                                    )
+                                },
+                                valueRange = 0f..1.5f,
+                                steps = 14,
+                                modifier = Modifier.testTag("profile_temperature_slider")
                             )
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "مقادیر پایین‌تر (۰.۲) برای کدنویسی و دقت بالا؛ مقادیر بالاتر (۱.۰+) برای خلاقیت.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Slider(
-                            value = tempSlider,
-                            onValueChange = { tempSlider = it },
-                            onValueChangeFinished = {
-                                dashboardViewModel.updatePreferredTemperature(
-                                    String.format(Locale.US, "%.1f", tempSlider).toDouble()
-                                )
-                            },
-                            valueRange = 0f..1.5f,
-                            steps = 14,
-                            modifier = Modifier.testTag("profile_temperature_slider")
-                        )
                     }
                 }
-            }
 
-            // Backend Diagnostics Card
-            item {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                // Sign Out Button
+                item {
+                    OutlinedButton(
+                        onClick = {
+                            signOut(credentialManager = credentialManager, scope = scope)
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f)),
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("profile_signout_btn")
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.Security,
-                                contentDescription = null,
-                                tint = EmeraldSuccess
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "وضعیت سرویس‌های ابری بک‌اند",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        BackendStatusRow("Firebase Auth (Google Sign-In)", "متصل")
-                        BackendStatusRow("Cloud Firestore Database", "همگام‌سازی لحظه‌ای")
-                        BackendStatusRow("Firebase AI Logic (Gemini 3.8)", "فعال")
-                        BackendStatusRow("Nano Banana 2.1 Image Studio", "آماده")
-                        BackendStatusRow("Firebase App Check", "پیکربندی‌شده")
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "خروج از حساب کاربری",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
-
-            // Sign Out Button
-            item {
-                OutlinedButton(
-                    onClick = {
-                        signOut(credentialManager = credentialManager, scope = scope)
-                    },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f)),
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("profile_signout_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Logout,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "خروج از حساب کاربری",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
         }
     }
 }
@@ -487,35 +468,6 @@ private fun ProfileStatPill(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun BackendStatusRow(service: String, status: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = service,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Filled.CheckCircle,
-                contentDescription = null,
-                tint = EmeraldSuccess,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = status,
-                style = MaterialTheme.typography.labelMedium,
-                color = EmeraldSuccess
             )
         }
     }

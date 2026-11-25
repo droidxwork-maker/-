@@ -12,11 +12,9 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.SmartToy
@@ -55,12 +53,10 @@ import com.example.ui.screens.AgentsPromptsScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.DashboardScreen
-import com.example.ui.screens.ImageStudioScreen
 import com.example.ui.screens.ProfileScreen
 import com.example.ui.viewmodel.AgentsPromptsViewModel
 import com.example.ui.viewmodel.ChatViewModel
 import com.example.ui.viewmodel.DashboardViewModel
-import com.example.ui.viewmodel.ImageStudioViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
@@ -86,13 +82,6 @@ sealed class PlatformRoute(
         unselectedIcon = Icons.AutoMirrored.Outlined.Chat
     )
 
-    data object Studio : PlatformRoute(
-        route = "studio",
-        labelRes = R.string.nav_studio,
-        selectedIcon = Icons.Filled.AutoAwesome,
-        unselectedIcon = Icons.Outlined.AutoAwesome
-    )
-
     data object Agents : PlatformRoute(
         route = "agents",
         labelRes = R.string.nav_agents,
@@ -108,7 +97,7 @@ sealed class PlatformRoute(
     )
 
     companion object {
-        val tabs = listOf(Dashboard, Chat, Studio, Agents, Profile)
+        val tabs = listOf(Dashboard, Chat, Agents, Profile)
     }
 }
 
@@ -163,10 +152,6 @@ private fun AuthenticatedPlatformShell(
     val chatViewModel: ChatViewModel = viewModel(
         key = "chat_$currentUserId",
         factory = ChatViewModel.provideFactory(firestoreRepo, geminiRepo, currentUserId)
-    )
-    val studioViewModel: ImageStudioViewModel = viewModel(
-        key = "studio_$currentUserId",
-        factory = ImageStudioViewModel.provideFactory(firestoreRepo, geminiRepo, currentUserId)
     )
     val agentsViewModel: AgentsPromptsViewModel = viewModel(
         key = "agents_$currentUserId",
@@ -273,9 +258,6 @@ private fun AuthenticatedPlatformShell(
                                     chatViewModel.selectConversation(conversation)
                                     navigateToTab(PlatformRoute.Chat.route)
                                 },
-                                onOpenImageStudio = {
-                                    navigateToTab(PlatformRoute.Studio.route)
-                                },
                                 onOpenAgentsHub = {
                                     navigateToTab(PlatformRoute.Agents.route)
                                 }
@@ -283,9 +265,6 @@ private fun AuthenticatedPlatformShell(
                         }
                         composable(PlatformRoute.Chat.route) {
                             ChatScreen(viewModel = chatViewModel)
-                        }
-                        composable(PlatformRoute.Studio.route) {
-                            ImageStudioScreen(viewModel = studioViewModel)
                         }
                         composable(PlatformRoute.Agents.route) {
                             AgentsPromptsScreen(
@@ -306,7 +285,6 @@ private fun AuthenticatedPlatformShell(
                                 userDisplayName = userDisplayName,
                                 userEmail = userEmail,
                                 userPhotoUrl = userPhotoUrl,
-                                currentUserId = currentUserId,
                                 isDarkTheme = isDarkTheme,
                                 onToggleTheme = onToggleTheme
                             )

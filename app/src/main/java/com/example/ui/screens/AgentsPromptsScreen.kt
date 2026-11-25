@@ -80,7 +80,7 @@ import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.viewmodel.AgentsPromptsViewModel
 import java.util.Locale
 
-private val PromptCategories = listOf("همه", "برنامه‌نویسی", "محتوا", "تحلیل", "تصویر", "عمومی")
+private val PromptCategories = listOf("همه", "برنامه‌نویسی", "محتوا", "تحلیل", "عمومی")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -141,7 +141,7 @@ fun AgentsPromptsScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "ساخت دستیارهای تخصصی با دستورالعمل اختصاصی، کتابخانه ابری پرامپت‌ها و بهینه‌ساز واقعی Gemini",
+                        text = "ساخت دستیارهای تخصصی با دستورالعمل اختصاصی، کتابخانه ابری پرامپت‌ها و بهینه‌ساز هوشمند",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -580,14 +580,14 @@ private fun PromptsAndOptimizerTabContent(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "بهینه‌ساز مهندسی پرامپت (Gemini)",
+                            text = "بهینه‌ساز هوشمند پرامپت",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "ایده خام خود را بنویسید تا هوش مصنوعی ساختار حرفه‌ای با خروجی JSON تولید کند.",
+                        text = "ایده خام خود را بنویسید تا هوش مصنوعی آن را به یک پرامپت ساختاریافته و دقیق تبدیل کند.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -614,12 +614,17 @@ private fun PromptsAndOptimizerTabContent(
                         FilterChip(
                             selected = targetType == "chat",
                             onClick = { targetType = "chat" },
-                            label = { Text("چت / کدنویسی") }
+                            label = { Text("گفتگو و تحلیل") }
                         )
                         FilterChip(
-                            selected = targetType == "image",
-                            onClick = { targetType = "image" },
-                            label = { Text("استودیو تصویر") }
+                            selected = targetType == "code",
+                            onClick = { targetType = "code" },
+                            label = { Text("برنامه‌نویسی") }
+                        )
+                        FilterChip(
+                            selected = targetType == "content",
+                            onClick = { targetType = "content" },
+                            label = { Text("نگارش و محتوا") }
                         )
                     }
 
@@ -644,7 +649,7 @@ private fun PromptsAndOptimizerTabContent(
                         } else {
                             Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("بهینه‌سازی با Gemini")
+                            Text("بهینه‌سازی هوشمند")
                         }
                     }
 
@@ -945,7 +950,6 @@ private fun AssistantEditorDialog(
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var role by remember { mutableStateOf(initial?.roleDescription ?: "") }
     var prompt by remember { mutableStateOf(initial?.systemPrompt ?: "") }
-    var selectedModel by remember { mutableStateOf(AiChatModel.fromId(initial?.modelName)) }
     var temp by remember { mutableFloatStateOf((initial?.temperature ?: 0.7).toFloat().coerceIn(0f, 1.5f)) }
 
     AlertDialog(
@@ -986,29 +990,12 @@ private fun AssistantEditorDialog(
                         .fillMaxWidth()
                         .testTag("assistant_prompt_input")
                 )
-                Text(
-                    text = "مدل پردازشگر",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    AiChatModel.entries.forEach { model ->
-                        FilterChip(
-                            selected = selectedModel == model,
-                            onClick = { selectedModel = model },
-                            label = { Text(model.badge) }
-                        )
-                    }
-                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "دمای خلاقیت (Temperature)",
+                        text = "درجه خلاقیت پاسخ",
                         style = MaterialTheme.typography.labelMedium
                     )
                     Text(
@@ -1027,7 +1014,7 @@ private fun AssistantEditorDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(name, role, prompt, selectedModel.modelId, temp) },
+                onClick = { onSave(name, role, prompt, AiChatModel.FLASH_LITE_3_5.modelId, temp) },
                 enabled = name.isNotBlank() && role.isNotBlank() && prompt.isNotBlank(),
                 modifier = Modifier.testTag("save_assistant_confirm_btn")
             ) {

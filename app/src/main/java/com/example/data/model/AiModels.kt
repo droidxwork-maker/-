@@ -5,11 +5,27 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+
+const val DEFAULT_DAILY_REQUEST_LIMIT = 50L
 
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Success<T>(val data: T) : UiState<T>
     data class Error(val message: String) : UiState<Nothing>
+}
+
+class DailyQuotaExceededException(message: String) : IllegalStateException(message)
+
+object QuotaDateHelper {
+    fun todayUtc(): String {
+        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        fmt.timeZone = TimeZone.getTimeZone("UTC")
+        return fmt.format(Date())
+    }
 }
 
 enum class AiChatModel(
@@ -19,65 +35,46 @@ enum class AiChatModel(
     val badge: String,
     val contextInfo: String
 ) {
-    FLASH_3_8(
-        modelId = "gemini-3.8-flash",
-        titleFa = "جمینای ۳.۸ فلش",
-        subtitleFa = "متعادل، سریع و دقیق برای وظایف عمومی و تحلیلی",
-        badge = "3.8 Flash",
-        contextInfo = "1M Context"
-    ),
     FLASH_LITE_3_5(
         modelId = "gemini-3.5-flash-lite",
         titleFa = "جمینای ۳.۵ لایت",
-        subtitleFa = "کمترین تأخیر و بالاترین سرعت برای پردازش‌های پرتکرار",
-        badge = "3.5 Lite",
-        contextInfo = "Ultra-Fast"
-    ),
-    ARGON_4(
-        modelId = "gemini-4-argon",
-        titleFa = "جمینای ۴ آرگون",
-        subtitleFa = "استدلال عمیق، مهندسی نرم‌افزار و حل مسائل پیچیده",
-        badge = "4 Argon",
-        contextInfo = "Pro Reasoning"
+        subtitleFa = "پاسخ‌گویی سریع، تحلیل متن و تصویر، نگارش و کدنویسی",
+        badge = "نوا ۳.۵ سریع",
+        contextInfo = "نسل جدید"
     );
 
     companion object {
-        fun fromId(id: String?): AiChatModel =
-            entries.firstOrNull { it.modelId == id } ?: FLASH_3_8
+        @Suppress("UNUSED_PARAMETER")
+        fun fromId(id: String?): AiChatModel = FLASH_LITE_3_5
     }
 }
 
-enum class AiImageModel(
-    val modelId: String,
+enum class AiResponseMode(
     val titleFa: String,
-    val subtitleFa: String
+    val descriptionFa: String,
+    val temperature: Float
 ) {
-    NANO_BANANA_2_1(
-        modelId = "gemini-nano-banana-2.1",
-        titleFa = "نانو بنانا ۲.۱",
-        subtitleFa = "رندر سریع و دقیق (پیشنهادی)"
+    BALANCED(
+        titleFa = "متعادل",
+        descriptionFa = "تعادل میان دقت و روانی پاسخ",
+        temperature = 0.7f
     ),
-    PRO_IMAGE_3(
-        modelId = "gemini-3-pro-image",
-        titleFa = "جمینای ۳ پرو ایمیج",
-        subtitleFa = "کیفیت استودیویی و جزئیات سینمایی"
+    PRECISE(
+        titleFa = "دقیق و کدنویسی",
+        descriptionFa = "بهینه برای برنامه‌نویسی، منطق و جداول",
+        temperature = 0.25f
+    ),
+    CREATIVE(
+        titleFa = "خلاق و ادبی",
+        descriptionFa = "مناسب ایده‌پردازی، سناریو و نگارش",
+        temperature = 1.0f
     );
 
     companion object {
-        fun fromId(id: String?): AiImageModel =
-            entries.firstOrNull { it.modelId == id } ?: NANO_BANANA_2_1
+        fun closestTo(temp: Float): AiResponseMode {
+            return entries.minByOrNull { kotlin.math.abs(it.temperature - temp) } ?: BALANCED
+        }
     }
-}
-
-enum class ImageAspectOption(
-    val label: String,
-    val ratioValue: String
-) {
-    SQUARE("مربع ۱:۱", "1:1"),
-    LANDSCAPE("عریض ۱۶:۹", "16:9"),
-    PORTRAIT("عمودی ۹:۱۶", "9:16"),
-    CLASSIC("کلاسیک ۴:۳", "4:3"),
-    TALL("پوستر ۳:۴", "3:4")
 }
 
 data class AiPersona(
@@ -86,7 +83,7 @@ data class AiPersona(
     val subtitleFa: String,
     val systemPrompt: String,
     val starterPrompt: String,
-    val defaultModel: AiChatModel = AiChatModel.FLASH_3_8,
+    val defaultModel: AiChatModel = AiChatModel.FLASH_LITE_3_5,
     val defaultTemperature: Double = 0.7,
     val isCustom: Boolean = false
 )
@@ -97,25 +94,25 @@ object AiPersonas {
             id = "general",
             titleFa = "دستیار جامع",
             subtitleFa = "پاسخگویی دقیق، ساختاریافته و تحلیلی",
-            systemPrompt = "شما دستیار هوشمند پلتفرم نوا هستید. به زبان فارسی روان، دقیق، مستند و ساختاریافته پاسخ دهید. از Markdown استاندارد برای تیترها، فهرست‌ها و کدها استفاده کنید.",
-            starterPrompt = "یک چک‌لیست اجرایی برای راه‌اندازی محصول نرم‌افزاری B2B طراحی کن."
+            systemPrompt = "شما دستیار هوشمند پلتفرم نوا هستید. به زبان فارسی روان، دقیق، مستند و ساختاریافته پاسخ دهید. از Markdown کامل برای تیترها، جداول مقایسه‌ای، فهرست‌ها و بلوک‌های کد استاندارد استفاده کنید.",
+            starterPrompt = "یک جدول مقایسه جامع بین معماری Monolith، Modular Monolith و Microservices ارائه بده."
         ),
         AiPersona(
             id = "coder",
             titleFa = "مهندس ارشد نرم‌افزار",
             subtitleFa = "معماری سیستم، کدنویسی تمیز و دیباگ",
-            systemPrompt = "شما مهندس ارشد نرم‌افزار هستید. کدهای امن، بهینه و قابل نگهداری بنویسید، با مثال و بلوک کد استاندارد توضیح دهید و ریسک‌های عملکردی را گوشزد کنید.",
-            starterPrompt = "یک الگوریتم Rate Limiter با Token Bucket در Kotlin بنویس.",
-            defaultModel = AiChatModel.ARGON_4,
-            defaultTemperature = 0.3
+            systemPrompt = "شما مهندس ارشد نرم‌افزار هستید. کدهای امن، بهینه و قابل نگهداری بنویسید، با مثال و بلوک کد مشخص‌شده با زبان برنامه‌نویسی توضیح دهید و ریسک‌های عملکردی و همزمانی را در قالب جدول یا نکات کلیدی گوشزد کنید.",
+            starterPrompt = "یک الگوریتم Rate Limiter با Token Bucket در Kotlin بنویس و پیچیدگی زمانی آن را تحلیل کن.",
+            defaultModel = AiChatModel.FLASH_LITE_3_5,
+            defaultTemperature = 0.25
         ),
         AiPersona(
             id = "writer",
             titleFa = "استراتژیست محتوا",
             subtitleFa = "نگارش حرفه‌ای، سناریو و کپی‌رایتینگ",
-            systemPrompt = "شما نویسنده و استراتژیست محتوای حرفه‌ای هستید. متون خلاقانه، دقیق و متناسب با لحن برند بنویسید.",
-            starterPrompt = "یک لندینگ‌پیج متقاعدکننده برای سرویس هوش مصنوعی سازمانی بنویس.",
-            defaultTemperature = 0.9
+            systemPrompt = "شما نویسنده و استراتژیست محتوای حرفه‌ای هستید. متون خلاقانه، دقیق، خوانا و متناسب با لحن تجاری بنویسید.",
+            starterPrompt = "یک ساختار صفحه فرود متقاعدکننده برای یک پلتفرم هوش مصنوعی سازمانی طراحی کن.",
+            defaultTemperature = 0.95
         ),
         AiPersona(
             id = "translator",
@@ -129,8 +126,8 @@ object AiPersonas {
             id = "strategist",
             titleFa = "تحلیلگر کسب‌وکار",
             subtitleFa = "مدل درآمدی، تحلیل بازار و رشد محصول",
-            systemPrompt = "شما تحلیلگر ارشد کسب‌وکار و محصول هستید. تحلیل‌های داده‌محور، شاخص‌های کلیدی (KPI) و راهکارهای عملی ارائه دهید.",
-            starterPrompt = "ساختار قیمت‌گذاری پلکانی برای یک پلتفرم SaaS هوش مصنوعی پیشنهاد بده.",
+            systemPrompt = "شما تحلیلگر ارشد کسب‌وکار و محصول هستید. تحلیل‌های داده‌محور، شاخص‌های کلیدی (KPI) و راهکارهای عملی را با جدول و ساختار شفاف ارائه دهید.",
+            starterPrompt = "ساختار قیمت‌گذاری پلکانی و سهمیه مصرف برای یک سرویس اشتراکی هوش مصنوعی پیشنهاد بده.",
             defaultTemperature = 0.5
         )
     )
@@ -151,11 +148,27 @@ data class UserProfile(
     val totalMessages: Long = 0L,
     val totalImages: Long = 0L,
     val totalTokensUsed: Long = 0L,
-    val preferredChatModel: String = AiChatModel.FLASH_3_8.modelId,
+    val dailyQuotaDate: String = "",
+    val dailyRequestsUsed: Long = 0L,
+    val dailyRequestLimit: Long = DEFAULT_DAILY_REQUEST_LIMIT,
+    val dailyTokensUsed: Long = 0L,
+    val preferredChatModel: String = AiChatModel.FLASH_LITE_3_5.modelId,
     val preferredTemperature: Double = 0.7,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
-)
+) {
+    fun effectiveDailyUsed(todayUtc: String = QuotaDateHelper.todayUtc()): Long =
+        if (dailyQuotaDate == todayUtc) dailyRequestsUsed.coerceAtLeast(0L) else 0L
+
+    fun effectiveDailyLimit(): Long =
+        if (dailyRequestLimit > 0L) dailyRequestLimit else DEFAULT_DAILY_REQUEST_LIMIT
+
+    fun remainingDailyRequests(todayUtc: String = QuotaDateHelper.todayUtc()): Long =
+        (effectiveDailyLimit() - effectiveDailyUsed(todayUtc)).coerceAtLeast(0L)
+
+    fun effectiveDailyTokens(todayUtc: String = QuotaDateHelper.todayUtc()): Long =
+        if (dailyQuotaDate == todayUtc) dailyTokensUsed.coerceAtLeast(0L) else 0L
+}
 
 @Keep
 @IgnoreExtraProperties
@@ -163,7 +176,7 @@ data class Conversation(
     @DocumentId val id: String = "",
     val userId: String = "",
     val title: String = "گفتگوی جدید",
-    val modelName: String = AiChatModel.FLASH_3_8.modelId,
+    val modelName: String = AiChatModel.FLASH_LITE_3_5.modelId,
     val personaId: String = "general",
     val systemPromptOverride: String? = null,
     val temperature: Double = 0.7,
@@ -193,29 +206,13 @@ data class ChatMessageRecord(
 
 @Keep
 @IgnoreExtraProperties
-data class ImageCreation(
-    @DocumentId val id: String = "",
-    val userId: String = "",
-    val prompt: String = "",
-    val negativePrompt: String? = null,
-    val stylePreset: String = "واقع‌گرایانه",
-    val aspectRatio: String = "1:1",
-    val modelName: String = AiImageModel.NANO_BANANA_2_1.modelId,
-    val localFileName: String? = null,
-    val editedFromSource: Boolean = false,
-    val latencyMs: Long = 0L,
-    @ServerTimestamp val createdAt: Timestamp? = null
-)
-
-@Keep
-@IgnoreExtraProperties
 data class CustomAssistant(
     @DocumentId val id: String = "",
     val userId: String = "",
     val name: String = "",
     val roleDescription: String = "",
     val systemPrompt: String = "",
-    val modelName: String = AiChatModel.FLASH_3_8.modelId,
+    val modelName: String = AiChatModel.FLASH_LITE_3_5.modelId,
     val temperature: Double = 0.7,
     val usageCount: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,

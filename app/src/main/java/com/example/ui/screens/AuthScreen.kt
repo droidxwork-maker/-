@@ -29,8 +29,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -184,20 +184,20 @@ fun AuthScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         FeatureHighlightCard(
                             icon = Icons.AutoMirrored.Filled.Chat,
-                            title = "گفتگوی زنده و چندوجهی",
-                            subtitle = "پاسخ‌دهی جریانی با Gemini 3.8 و تحلیل تصاویر",
+                            title = "گفتگوی هوشمند و تحلیل تصویر",
+                            subtitle = "پاسخ‌دهی جریانی، جداول حرفه‌ای، رندر کامل کد و بررسی تصاویر",
                             accentColor = MaterialTheme.colorScheme.primary
                         )
                         FeatureHighlightCard(
-                            icon = Icons.Filled.Image,
-                            title = "استودیو خلق و ویرایش تصویر",
-                            subtitle = "ساخت آثار هنری با Nano Banana 2.1 و خروجی گالری",
+                            icon = Icons.Filled.SmartToy,
+                            title = "دستیارهای تخصصی و پرامپت",
+                            subtitle = "ساخت دستیارهای سفارشی و بهینه‌سازی هوشمند دستورات",
                             accentColor = MaterialTheme.colorScheme.secondary
                         )
                         FeatureHighlightCard(
                             icon = Icons.Filled.CloudDone,
-                            title = "داشبورد و همگام‌سازی ابری",
-                            subtitle = "ذخیره امن تاریخچه گفتگوها و آمار استفاده در Firestore",
+                            title = "سهمیه روزانه و همگام‌سازی ابری",
+                            subtitle = "مدیریت هوشمند اعتبار روزانه و ذخیره امن تاریخچه گفتگوها",
                             accentColor = MaterialTheme.colorScheme.tertiary
                         )
                     }
@@ -248,7 +248,7 @@ fun AuthScreen(
                             scope = scope,
                             onAuthCancelled = {
                                 isLoading = false
-                                errorMessage = "ورود با گوگل تکمیل نشد. اگر حساب را انتخاب کردید و وارد نشد، کلید SHA-1 امضای این نسخه در Firebase ثبت نشده است."
+                                errorMessage = "ورود با حساب گوگل تکمیل نشد. لطفاً دوباره تلاش کنید یا بررسی کنید نسخه برنامه با کلید معتبر امضا شده باشد."
                             }
                         )
                     },

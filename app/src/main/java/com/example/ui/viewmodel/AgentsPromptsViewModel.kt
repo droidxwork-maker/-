@@ -6,7 +6,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.data.model.AiChatModel
 import com.example.data.model.CustomAssistant
+import com.example.data.model.DailyQuotaExceededException
 import com.example.data.model.PromptOptimizationResult
 import com.example.data.model.SavedPrompt
 import com.example.data.model.UiState
@@ -14,6 +16,7 @@ import com.example.data.repository.FirestoreRepository
 import com.example.data.repository.GeminiAiRepository
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class AgentsPromptsViewModel(
     private val firestoreRepo: FirestoreRepository,
@@ -88,10 +92,10 @@ class AgentsPromptsViewModel(
                 name = name,
                 roleDescription = roleDescription,
                 systemPrompt = systemPrompt,
-                modelName = modelName,
+                modelName = AiChatModel.fromId(modelName).modelId,
                 temperature = temperature
             ).onSuccess {
-                _noticeMessage.value = "دستیار هوشمند ذخیره و در ابر همگام شد."
+                _noticeMessage.value = "دستیار هوشمند ذخیره و در حساب ابری همگام شد."
             }.onFailure { e ->
                 _noticeMessage.value = e.localizedMessage ?: "ذخیره دستیار ناموفق بود."
             }
@@ -142,20 +146,38 @@ class AgentsPromptsViewModel(
         if (_isOptimizing.value) return
         viewModelScope.launch {
             _isOptimizing.value = true
+            var reservedQuotaDate: String? = null
+            var produced = false
             try {
+                val quota = firestoreRepo.consumeDailyQuotaIfAvailable().getOrThrow()
+                reservedQuotaDate = quota.quotaDateUtc
+
                 val res = geminiRepo.optimizePrompt(trimmed, targetType)
+                produced = true
                 _optimizedResult.value = res
                 firestoreRepo.recordOptimizerUsage(
-                    modelName = "gemini-3.8-flash",
+                    modelName = AiChatModel.FLASH_LITE_3_5.modelId,
                     promptTokens = res.promptTokens.toLong(),
                     completionTokens = res.completionTokens.toLong(),
                     totalTokens = res.totalTokens.toLong(),
                     latencyMs = res.latencyMs
                 )
+            } catch (e: DailyQuotaExceededException) {
+                _noticeMessage.value = e.message ?: "سهمیه روزانه شما به پایان رسیده است."
             } catch (e: CancellationException) {
+                if (!produced && reservedQuotaDate != null) {
+                    withContext(NonCancellable) {
+                        firestoreRepo.refundDailyQuotaUnit(reservedQuotaDate)
+                    }
+                }
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Optimizer failed", e)
+                if (!produced && reservedQuotaDate != null) {
+                    withContext(NonCancellable) {
+                        firestoreRepo.refundDailyQuotaUnit(reservedQuotaDate)
+                    }
+                }
                 _noticeMessage.value = e.localizedMessage ?: "خطا در بهینه‌سازی پرامپت."
             } finally {
                 _isOptimizing.value = false
