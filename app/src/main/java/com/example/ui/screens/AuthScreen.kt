@@ -248,6 +248,7 @@ fun AuthScreen(
                             scope = scope,
                             onAuthCancelled = {
                                 isLoading = false
+                                errorMessage = "ورود با گوگل تکمیل نشد. اگر حساب را انتخاب کردید و وارد نشد، کلید SHA-1 امضای این نسخه در Firebase ثبت نشده است."
                             }
                         )
                     },

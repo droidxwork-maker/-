@@ -23,10 +23,14 @@ import com.google.firebase.ai.type.ResponseModality
 import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
+import com.google.firebase.appcheck.FirebaseAppCheck
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
@@ -56,6 +60,26 @@ data class ImageGenResult(
 
 class GeminiAiRepository {
 
+    private suspend fun ensureAppCheckTokenReady() {
+        try {
+            withTimeout(25_000L) {
+                FirebaseAppCheck.getInstance().getAppCheckToken(false).await()
+            }
+        } catch (e: TimeoutCancellationException) {
+            Log.e(TAG, "App Check token fetch timed out after 25s", e)
+            throw IllegalStateException(
+                "دریافت تاییدیه امنیتی App Check (reCAPTCHA) زمان‌بر شد. لطفاً اتصال اینترنت یا VPN را بررسی کرده و دوباره تلاش کنید."
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "App Check token fetch failed", e)
+            throw IllegalStateException(
+                "خطا در تاییدیه امنیتی App Check: ${e.localizedMessage ?: "نامشخص"}"
+            )
+        }
+    }
+
     fun streamChatReply(
         modelName: String,
         systemPrompt: String,
@@ -64,6 +88,7 @@ class GeminiAiRepository {
         userPrompt: String,
         attachedBitmap: Bitmap?
     ): Flow<ChatStreamEvent> = flow {
+        ensureAppCheckTokenReady()
         val startTime = System.currentTimeMillis()
         val config = generationConfig {
             this.temperature = temperature.coerceIn(0f, 2f)
@@ -129,6 +154,7 @@ class GeminiAiRepository {
         aspectRatio: String,
         sourceBitmap: Bitmap?
     ): ImageGenResult = withContext(Dispatchers.IO) {
+        ensureAppCheckTokenReady()
         val startTime = System.currentTimeMillis()
         val mappedRatio = when (aspectRatio) {
             "16:9" -> AspectRatio.LANDSCAPE_16x9
@@ -185,6 +211,7 @@ class GeminiAiRepository {
 
     suspend fun optimizePrompt(rawPrompt: String, targetType: String): PromptOptimizationResult =
         withContext(Dispatchers.IO) {
+            ensureAppCheckTokenReady()
             val startTime = System.currentTimeMillis()
             val schema = Schema.obj(
                 properties = mapOf(
