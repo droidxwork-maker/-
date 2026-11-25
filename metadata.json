@@ -1,0 +1,6 @@
+{
+  "name": "نوا هوش",
+  "description": "پلتفرم هوشمند هوش مصنوعی با قابلیت چت پیشرفته، تولید تصویر با AI، داشبورد تحلیلی و همگام‌سازی ابری",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

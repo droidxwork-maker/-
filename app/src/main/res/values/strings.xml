@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">نوا هوش</string>
+    <string name="nav_dashboard">داشبورد</string>
+    <string name="nav_chat">چت هوشمند</string>
+    <string name="nav_studio">استودیو تصویر</string>
+    <string name="nav_agents">دستیارها</string>
+    <string name="nav_profile">حساب کاربری</string>
+    <string name="auth_welcome_title">پلتفرم جامع هوش مصنوعی نوا</string>
+    <string name="auth_welcome_subtitle">ورود به محیط کاری حرفه‌ای با مدل‌های Gemini 3.8 و 4 Argon، استودیو تصویر Nano Banana و پایش دقیق توکن و مصرف ابری</string>
+    <string name="auth_google_button">ورود یا ثبت‌نام با گوگل</string>
+    <string name="auth_security_note">احراز هویت امن Google Credential Manager و رمزنگاری Firebase App Check</string>
+    <string name="chat_input_placeholder">پیام، کد یا دستور خود را بنویسید...</string>
+    <string name="studio_prompt_placeholder">صحنه، نورپردازی، زاویه دوربین و جزئیات تصویر را بنویسید...</string>
+    <string name="error_generic">خطایی رخ داد. لطفاً دوباره تلاش کنید.</string>
+</resources>

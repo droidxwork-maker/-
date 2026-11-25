@@ -1,0 +1,237 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile and real AI platform usage telemetry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "totalChats": { "type": "integer" },
+        "totalMessages": { "type": "integer" },
+        "totalImages": { "type": "integer" },
+        "totalTokensUsed": { "type": "integer" },
+        "preferredChatModel": {
+          "type": "string",
+          "enum": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-argon"]
+        },
+        "preferredTemperature": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "totalChats",
+        "totalMessages",
+        "totalImages",
+        "totalTokensUsed",
+        "preferredChatModel",
+        "preferredTemperature",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "An AI chat conversation thread owned by a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "modelName": {
+          "type": "string",
+          "enum": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-argon"]
+        },
+        "personaId": { "type": "string" },
+        "systemPromptOverride": { "type": "string" },
+        "temperature": { "type": "number" },
+        "pinned": { "type": "boolean" },
+        "lastMessagePreview": { "type": "string" },
+        "messageCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "title",
+        "modelName",
+        "personaId",
+        "temperature",
+        "pinned",
+        "lastMessagePreview",
+        "messageCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatMessageRecord": {
+      "title": "ChatMessageRecord",
+      "description": "A single message in a user's AI conversation with real token & latency telemetry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "model"] },
+        "text": { "type": "string" },
+        "modelName": { "type": "string" },
+        "hasImageAttachment": { "type": "boolean" },
+        "promptTokens": { "type": "integer" },
+        "completionTokens": { "type": "integer" },
+        "totalTokens": { "type": "integer" },
+        "latencyMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "conversationId",
+        "role",
+        "text",
+        "hasImageAttachment",
+        "promptTokens",
+        "completionTokens",
+        "totalTokens",
+        "latencyMs",
+        "createdAt"
+      ]
+    },
+    "ImageCreation": {
+      "title": "ImageCreation",
+      "description": "Metadata record of an AI-generated or edited image.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "prompt": { "type": "string" },
+        "negativePrompt": { "type": "string" },
+        "stylePreset": { "type": "string" },
+        "aspectRatio": { "type": "string" },
+        "modelName": {
+          "type": "string",
+          "enum": ["gemini-nano-banana-2.1", "gemini-3-pro-image"]
+        },
+        "localFileName": { "type": "string" },
+        "editedFromSource": { "type": "boolean" },
+        "latencyMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "prompt",
+        "stylePreset",
+        "aspectRatio",
+        "modelName",
+        "editedFromSource",
+        "latencyMs",
+        "createdAt"
+      ]
+    },
+    "CustomAssistant": {
+      "title": "CustomAssistant",
+      "description": "User-created custom AI agent with system instructions and model parameters.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "roleDescription": { "type": "string" },
+        "systemPrompt": { "type": "string" },
+        "modelName": {
+          "type": "string",
+          "enum": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-argon"]
+        },
+        "temperature": { "type": "number" },
+        "usageCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "name",
+        "roleDescription",
+        "systemPrompt",
+        "modelName",
+        "temperature",
+        "usageCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SavedPrompt": {
+      "title": "SavedPrompt",
+      "description": "Reusable user prompt template stored in the Prompt Library.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "title",
+        "category",
+        "content",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UsageLog": {
+      "title": "UsageLog",
+      "description": "Real API call telemetry ledger recording token counts and latency.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "serviceType": { "type": "string", "enum": ["chat", "image", "optimizer"] },
+        "modelName": { "type": "string" },
+        "promptTokens": { "type": "integer" },
+        "completionTokens": { "type": "integer" },
+        "totalTokens": { "type": "integer" },
+        "latencyMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "serviceType",
+        "modelName",
+        "promptTokens",
+        "completionTokens",
+        "totalTokens",
+        "latencyMs",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile and cumulative AI telemetry."
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "User AI chat conversations."
+    },
+    "/users/{userId}/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessageRecord" },
+      "description": "Messages inside an AI chat conversation."
+    },
+    "/users/{userId}/imageCreations/{creationId}": {
+      "schema": { "$ref": "#/entities/ImageCreation" },
+      "description": "AI image generation history."
+    },
+    "/users/{userId}/assistants/{assistantId}": {
+      "schema": { "$ref": "#/entities/CustomAssistant" },
+      "description": "User-created custom AI agents."
+    },
+    "/users/{userId}/prompts/{promptId}": {
+      "schema": { "$ref": "#/entities/SavedPrompt" },
+      "description": "User saved prompt templates."
+    },
+    "/users/{userId}/usageLogs/{logId}": {
+      "schema": { "$ref": "#/entities/UsageLog" },
+      "description": "Real API usage and token telemetry ledger."
+    }
+  }
+}

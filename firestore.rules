@@ -1,0 +1,283 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidChatModel(model) {
+      return model in ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-argon'];
+    }
+
+    function isValidImageModel(model) {
+      return model in ['gemini-nano-banana-2.1', 'gemini-3-pro-image'];
+    }
+
+    function isValidTemperature(t) {
+      return t is number && t >= 0.0 && t <= 2.0;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1000)) &&
+             data.totalChats is int && data.totalChats >= 0 &&
+             data.totalMessages is int && data.totalMessages >= 0 &&
+             data.totalImages is int && data.totalImages >= 0 &&
+             (!('totalTokensUsed' in data) || (data.totalTokensUsed is int && data.totalTokensUsed >= 0)) &&
+             data.preferredChatModel is string && isValidChatModel(data.preferredChatModel) &&
+             (!('preferredTemperature' in data) || isValidTemperature(data.preferredTemperature)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidConversation(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.modelName is string && isValidChatModel(data.modelName) &&
+             data.personaId is string && data.personaId.size() >= 1 && data.personaId.size() <= 80 &&
+             (!('systemPromptOverride' in data) || (data.systemPromptOverride is string && data.systemPromptOverride.size() <= 2000)) &&
+             (!('temperature' in data) || isValidTemperature(data.temperature)) &&
+             (!('pinned' in data) || data.pinned is bool) &&
+             data.lastMessagePreview is string && data.lastMessagePreview.size() <= 300 &&
+             data.messageCount is int && data.messageCount >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidMessage(data, userId, conversationId) {
+      return data.userId is string && data.userId == userId &&
+             data.conversationId is string && data.conversationId == conversationId &&
+             data.role in ['user', 'model'] &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 30000 &&
+             (!('modelName' in data) || (data.modelName is string && data.modelName.size() <= 80)) &&
+             data.hasImageAttachment is bool &&
+             (!('promptTokens' in data) || (data.promptTokens is int && data.promptTokens >= 0)) &&
+             (!('completionTokens' in data) || (data.completionTokens is int && data.completionTokens >= 0)) &&
+             (!('totalTokens' in data) || (data.totalTokens is int && data.totalTokens >= 0)) &&
+             (!('latencyMs' in data) || (data.latencyMs is int && data.latencyMs >= 0)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidImageCreation(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.prompt is string && data.prompt.size() >= 1 && data.prompt.size() <= 1000 &&
+             (!('negativePrompt' in data) || (data.negativePrompt is string && data.negativePrompt.size() <= 500)) &&
+             data.stylePreset is string && data.stylePreset.size() >= 1 && data.stylePreset.size() <= 60 &&
+             data.aspectRatio is string && data.aspectRatio.size() >= 1 && data.aspectRatio.size() <= 20 &&
+             data.modelName is string && isValidImageModel(data.modelName) &&
+             (!('localFileName' in data) || (data.localFileName is string && data.localFileName.size() <= 200)) &&
+             data.editedFromSource is bool &&
+             (!('latencyMs' in data) || (data.latencyMs is int && data.latencyMs >= 0)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidCustomAssistant(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+             data.roleDescription is string && data.roleDescription.size() >= 1 && data.roleDescription.size() <= 160 &&
+             data.systemPrompt is string && data.systemPrompt.size() >= 1 && data.systemPrompt.size() <= 2000 &&
+             data.modelName is string && isValidChatModel(data.modelName) &&
+             isValidTemperature(data.temperature) &&
+             data.usageCount is int && data.usageCount >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSavedPrompt(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 80 &&
+             data.category is string && data.category.size() >= 1 && data.category.size() <= 40 &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 2000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidUsageLog(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.serviceType in ['chat', 'image', 'optimizer'] &&
+             data.modelName is string && data.modelName.size() >= 1 && data.modelName.size() <= 80 &&
+             data.promptTokens is int && data.promptTokens >= 0 &&
+             data.completionTokens is int && data.completionTokens >= 0 &&
+             data.totalTokens is int && data.totalTokens >= 0 &&
+             data.latencyMs is int && data.latencyMs >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // 1. User Profile Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'totalChats', 'totalMessages', 'totalImages', 'totalTokensUsed', 'preferredChatModel', 'preferredTemperature', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'totalChats', 'totalMessages', 'totalImages', 'totalTokensUsed', 'preferredChatModel', 'preferredTemperature', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUserProfile(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'preferredChatModel', 'preferredTemperature', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['preferredChatModel', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['preferredTemperature', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalChats', 'totalMessages', 'totalImages', 'totalTokensUsed', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalChats', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalMessages', 'totalTokensUsed', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalMessages', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalImages', 'totalTokensUsed', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalImages', 'updatedAt']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['totalTokensUsed', 'updatedAt'])
+                       );
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // 2. Conversations Subcollection
+      match /conversations/{conversationId} {
+        allow get: if isOwner(userId) && isValidId(conversationId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(conversationId) &&
+                         incoming().keys().hasAll(['userId', 'title', 'modelName', 'personaId', 'temperature', 'pinned', 'lastMessagePreview', 'messageCount', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'title', 'modelName', 'personaId', 'systemPromptOverride', 'temperature', 'pinned', 'lastMessagePreview', 'messageCount', 'createdAt', 'updatedAt']) &&
+                         isValidConversation(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(conversationId) &&
+                         isValidConversation(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'updatedAt']) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['pinned', 'updatedAt']) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['modelName', 'updatedAt']) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['temperature', 'systemPromptOverride', 'updatedAt']) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['lastMessagePreview', 'messageCount', 'updatedAt']) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastMessagePreview', 'messageCount', 'modelName', 'updatedAt'])
+                         );
+
+        allow delete: if isOwner(userId) && isValidId(conversationId);
+
+        // 3. Messages Subcollection
+        match /messages/{messageId} {
+          allow get: if isOwner(userId) && isValidId(conversationId) && isValidId(messageId);
+          allow list: if isOwner(userId) && isValidId(conversationId);
+
+          allow create: if isOwner(userId) &&
+                           isValidId(conversationId) &&
+                           isValidId(messageId) &&
+                           incoming().keys().hasAll(['userId', 'conversationId', 'role', 'text', 'hasImageAttachment', 'promptTokens', 'completionTokens', 'totalTokens', 'latencyMs', 'createdAt']) &&
+                           incoming().keys().hasOnly(['userId', 'conversationId', 'role', 'text', 'modelName', 'hasImageAttachment', 'promptTokens', 'completionTokens', 'totalTokens', 'latencyMs', 'createdAt']) &&
+                           isValidMessage(incoming(), userId, conversationId) &&
+                           exists(/databases/$(database)/documents/users/$(userId)/conversations/$(conversationId));
+
+          allow update: if false;
+          allow delete: if isOwner(userId) && isValidId(conversationId) && isValidId(messageId);
+        }
+      }
+
+      // 4. Image Creations Subcollection
+      match /imageCreations/{creationId} {
+        allow get: if isOwner(userId) && isValidId(creationId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(creationId) &&
+                         incoming().keys().hasAll(['userId', 'prompt', 'stylePreset', 'aspectRatio', 'modelName', 'editedFromSource', 'latencyMs', 'createdAt']) &&
+                         incoming().keys().hasOnly(['userId', 'prompt', 'negativePrompt', 'stylePreset', 'aspectRatio', 'modelName', 'localFileName', 'editedFromSource', 'latencyMs', 'createdAt']) &&
+                         isValidImageCreation(incoming(), userId);
+
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(creationId);
+      }
+
+      // 5. Custom AI Assistants Subcollection
+      match /assistants/{assistantId} {
+        allow get: if isOwner(userId) && isValidId(assistantId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(assistantId) &&
+                         incoming().keys().hasAll(['userId', 'name', 'roleDescription', 'systemPrompt', 'modelName', 'temperature', 'usageCount', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'roleDescription', 'systemPrompt', 'modelName', 'temperature', 'usageCount', 'createdAt', 'updatedAt']) &&
+                         isValidCustomAssistant(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(assistantId) &&
+                         isValidCustomAssistant(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'roleDescription', 'systemPrompt', 'modelName', 'temperature', 'updatedAt']) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['usageCount', 'updatedAt'])
+                         );
+
+        allow delete: if isOwner(userId) && isValidId(assistantId);
+      }
+
+      // 6. Saved Prompt Templates Subcollection
+      match /prompts/{promptId} {
+        allow get: if isOwner(userId) && isValidId(promptId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(promptId) &&
+                         incoming().keys().hasAll(['userId', 'title', 'category', 'content', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'title', 'category', 'content', 'createdAt', 'updatedAt']) &&
+                         isValidSavedPrompt(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(promptId) &&
+                         isValidSavedPrompt(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'content', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(promptId);
+      }
+
+      // 7. Usage Telemetry Ledger Subcollection
+      match /usageLogs/{logId} {
+        allow get: if isOwner(userId) && isValidId(logId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(logId) &&
+                         incoming().keys().hasAll(['userId', 'serviceType', 'modelName', 'promptTokens', 'completionTokens', 'totalTokens', 'latencyMs', 'createdAt']) &&
+                         incoming().keys().hasOnly(['userId', 'serviceType', 'modelName', 'promptTokens', 'completionTokens', 'totalTokens', 'latencyMs', 'createdAt']) &&
+                         isValidUsageLog(incoming(), userId);
+
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(logId);
+      }
+    }
+  }
+}
